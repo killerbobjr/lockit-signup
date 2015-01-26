@@ -7,6 +7,7 @@ var uuid = require('node-uuid');
 var ms = require('ms');
 var moment = require('moment');
 var Mail = require('lockit-sendmail');
+var async = require('async');
 
 
 
@@ -123,80 +124,92 @@ Signup.prototype.postSignup = function(req, res, next) {
     return;
   }
 
-  // check for duplicate name
-  adapter.find('name', name, function(err, user) {
-    if (err) return next(err);
+	var checks = [];
+	checks.push({value:'name',data:name});
+	checks.push({value:'email',data:email});
+	
+	async.each(checks, function(check, nextasync)
+		{
+			adapter.find(check.value, check.data, function(err, user)
+				{
+					if(err)
+						return next(err)
+					else if(user !== undefined && user !== null)
+					{
+						if(user.accountInvalid)
+							error = 'That account ' + check.value + ' cannot be used';
+						else
+							error = 'That account ' + check.value + ' already exists';
+						nextasync();
+					}
+					else
+						nextasync();
+				});
+		},
+		function(err)
+		{
+			if(err)
+				return next(err);
+			else if(typeof error === 'string')
+			{
+				if (config.rest)
+					return res.json(403, {error: error});
+				else
+				{
+					// render template with error message
+					res.status(403);
+					res.render(errorView,
+						{
+							title: 'Sign up',
+							error: error,
+							basedir: req.app.get('views'),
+							name: name,
+							email: email
+						});
+					return;
+				}
+			}
+			else
+			{
+				// save new user to db
+				adapter.save(name, email, password, function(err, user)
+					{
+						if(err)
+							return next(err);
+						else
+						{
+							// send email with link for address verification
+							//console.log('config: ', config);
+							
+							var mail = new Mail(config);
+							mail.signup(user.name, user.email, user.signupToken, function(err, result)
+								{
+									if(err)
+										return next(err);
+									else
+									{
+										// emit event
+										that.emit('signup::post', user);
 
-    if (user) {
-      error = 'Username already taken';
-      // send only JSON when REST is active
-      if (config.rest) return res.json(403, {error: error});
-
-      // render template with error message
-      res.status(403);
-      res.render(errorView, {
-        title: 'Sign up',
-        error: error,
-        basedir: req.app.get('views'),
-        name: name,
-        email: email
-      });
-      return;
-    }
-
-    // check for duplicate email - send reminder when duplicate email is found
-    adapter.find('email', email, function(err, user) {
-      if (err) return next(err);
-
-      // custom or built-in view
-      var successView = config.signup.views.signedUp || join('post-signup');
-
-      if (user) {
-        // send already registered email
-        var mail = new Mail(config);
-        mail.taken(user.name, user.email, function(err, result) {
-          if (err) return next(err);
-
-          // send only JSON when REST is active
-          if (config.rest) return res.send(204);
-
-          res.render(successView, {
-            title: 'Sign up - Email sent',
-            basedir: req.app.get('views')
-          });
-        });
-
-        return;
-      }
-
-      // looks like everything is fine
-
-      // save new user to db
-      adapter.save(name, email, password, function(err, user) {
-        if (err) return next(err);
-
-        // send email with link for address verification
-        var mail = new Mail(config);
-        mail.signup(user.name, user.email, user.signupToken, function(err, result) {
-          if (err) return next(err);
-
-          // emit event
-          that.emit('signup::post', user);
-
-          // send only JSON when REST is active
-          if (config.rest) return res.send(204);
-
-          res.render(successView, {
-            title: 'Sign up - Email sent',
-            basedir: req.app.get('views')
-          });
-        });
-
-      });
-
-    });
-
-  });
+										// send only JSON when REST is active
+										if(config.rest)
+											return res.send(204);
+										else
+										{
+											var successView = config.signup.views.signedUp || join('post-signup');
+											res.render(successView,
+												{
+													title: 'Sign up - Email sent',
+													basedir: req.app.get('views')
+												});
+										}
+									}
+								});
+						}
+					});
+				
+			}
+		});
 };
 
 
@@ -264,6 +277,25 @@ Signup.prototype.postSignupResend = function(req, res, next) {
   // check for user with given email address
   adapter.find('email', email, function(err, user) {
     if (err) return next(err);
+	if (user) {
+		if(user.accountInvalid) {
+		  error = 'That account email is invalid';
+		  // send only JSON when REST is active
+		  if (config.rest) return res.json(403, {error: error});
+		  
+		  var errorView = config.signup.views.resend || join('resend-verification');
+
+		  // render template with error message
+		  res.status(403);
+		  res.render(errorView, {
+			title: 'Resend verification email',
+			error: error,
+			basedir: req.app.get('views'),
+			email: email
+		  });
+		  return;
+		}
+	}
 
     // custom or built-in view
     var successView = config.signup.views.signedUp || join('post-signup');
