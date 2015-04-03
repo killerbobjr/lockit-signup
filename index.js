@@ -94,15 +94,15 @@ Signup.prototype.postSignup = function(req, res, next) {
 
   // check for valid inputs
   if (!name || !email || !password) {
-    error = 'All fields are required';
+    error = 'All fields are required!';
   } else if (name !== encodeURIComponent(name)) {
-    error = 'Username may not contain any non-url-safe characters';
-  } else if (name !== name.toLowerCase()) {
-    error = 'Username must be lowercase';
-  } else if (!name.charAt(0).match(/[a-z]/)) {
-    error = 'Username has to start with a lowercase letter (a-z)';
+    error = 'Your screen name may only contain the characters A-Z, a-z, 0-9, and space';
+//  } else if (name !== name.toLowerCase()) {
+//    error = 'Username must be lowercase';
+//  } else if (!name.charAt(0).match(/[a-z]/)) {
+//    error = 'Username has to start with a lowercase letter (a-z)';
   } else if (!email.match(EMAIL_REGEXP)) {
-    error = 'Email is invalid';
+    error = 'You have entered an invalid email address';
   }
 
   // custom or built-in view
