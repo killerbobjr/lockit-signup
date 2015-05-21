@@ -91,12 +91,13 @@ Signup.prototype.postSignup = function(req, res, next) {
   var error = null;
   // regexp from https://github.com/angular/angular.js/blob/master/src/ng/directive/input.js#L4
   var EMAIL_REGEXP = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,6}$/;
+  var NAME_REGEXP = /^[\x20a-z0-9_-]{3,50}$/;
 
   // check for valid inputs
   if (!name || !email || !password) {
     error = 'All fields are required!';
-  } else if (name !== encodeURIComponent(name)) {
-    error = 'Your screen name may only contain the characters A-Z, a-z, 0-9, and space';
+  } else if (!name.match(NAME_REGEXP)) {
+    error = 'Must be between 3 to 50 characters containing only A-Z, a-z, 0-9, - _ or space';
 //  } else if (name !== name.toLowerCase()) {
 //    error = 'Username must be lowercase';
 //  } else if (!name.charAt(0).match(/[a-z]/)) {
