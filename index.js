@@ -8,6 +8,7 @@ var moment = require('moment');
 var Mail = require('lockit-sendmail');
 var async = require('async');
 var phone = require('phone');
+var sinchrtc = require('sinch-rtc');
 
 /**
  * Internal helper functions
@@ -15,36 +16,6 @@ var phone = require('phone');
 function join(view)
 {
 	return path.join(__dirname, 'views', view);
-}
-
-function base64_to_base10(str)
-{
-	var order = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_-";
-	var base = order.length;
-	var num = 0, r;
-	while (str.length)
-	{
-		r = order.indexOf(str.charAt(0));
-		str = str.substr(1);
-		num *= base;
-		num += r;
-	}
-	return num;
-}
-	
-function base10_to_base64(num)
-{
-	var order = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_-";
-	var base = order.length;
-	var str = "", r;
-	while (num)
-	{
-		r = num % base;
-		num -= r;
-		num /= base;
-		str = order.charAt(r) + str;
-	}
-	return str;
 }
 
 /**
@@ -56,6 +27,8 @@ function base10_to_base64(num)
  */
 var Signup = module.exports = function (config, adapter)
 {
+	var that = this;
+	
 	if(!(this instanceof Signup))
 		return new Signup(config, adapter);
 	events.EventEmitter.call(this);
@@ -74,6 +47,25 @@ var Signup = module.exports = function (config, adapter)
 	router.post(route + '/resend-verification', this.postSignupResend.bind(this));
 	router.get(route + '/:token', this.getSignupToken.bind(this));
 	this.router = router;
+	
+	//console.log('config.sinchApplicationkey:', config.sinchApplicationkey);
+	
+	if(config.sinchApplicationkey !== undefined)
+	{
+		this.sinchClient = new sinchrtc(
+		{
+			applicationKey: config.sinchApplicationkey,
+			//Note: For additional logging, please uncomment the three rows below
+			onLogMessage: function(message)
+			{
+				//console.log('sinchClient:', message);
+			}
+		});
+		
+		//console.log('sinchClient initialized:', that.sinchClient);
+		
+		this.ongoingVerification = null;
+	}
 };
 
 util.inherits(Signup, events.EventEmitter);
@@ -124,6 +116,7 @@ Signup.prototype.postSignup = function (req, res, next)
 	var EMAIL_REGEXP = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,6}$/;
 	var NAME_REGEXP = /^[\x20a-z0-9_-]{3,50}$/;
 
+	console.log('signup-----------------------------');
 	// check for valid inputs
 	if(!name || !email || !password)
 	{
@@ -147,7 +140,8 @@ Signup.prototype.postSignup = function (req, res, next)
 	}
 	else if(sms.length > 1)
 	{
-		sms = phone(sms)[0].replace(/\D/g,'');	// Strip the '+' character node-phone leaves in
+		if(that.sinchClient === undefined)
+			sms = phone(sms)[0].replace(/\D/g,'');	// Strip the '+' character node-phone puts in
 	}
 
 	// custom or built-in view
@@ -234,6 +228,39 @@ Signup.prototype.postSignup = function (req, res, next)
 					{
 						if(err)
 							return next(err);
+						else if(sms.length > 1 && that.sinchClient !== undefined)
+						{
+							that.ongoingVerification = that.sinchClient.createSmsVerification(sms, u.signupToken);
+							
+							that.ongoingVerification.initiate(
+							
+								function()
+								{
+									// Succeeded
+									
+									// emit event
+									that.emit('signup::post', user);
+
+									// send only JSON when REST is active
+									if(config.rest)
+										return res.send(204);
+									else
+									{
+										var successView = config.signup.views.smsSent || join('post-signup');
+										res.render(successView,
+											{
+												title: 'Sign up - SMS code sent',
+												basedir: req.app.get('views')
+											});
+									}
+								},
+								function()
+								{
+									// Failed
+									return next(err);
+								});
+							
+						}
 						else
 						{
 							// send email with link for address verification
@@ -331,6 +358,7 @@ Signup.prototype.postSignupResend = function (req, res, next)
 {
 	var config = this.config;
 	var adapter = this.adapter;
+	var that = this;
 
 	var email = req.body.email;
 	var sms = req.body.phone;
@@ -399,7 +427,7 @@ Signup.prototype.postSignupResend = function (req, res, next)
 					});
 				return;
 			}
-			else
+			else if(user.emailVerified)
 			{
 				// send only JSON when REST is active
 				if(config.rest)
@@ -450,7 +478,7 @@ Signup.prototype.postSignupResend = function (req, res, next)
 		// we have an existing user with provided email address
 
 		// create new signup token
-		var token = base64_to_base10(uuid.generate()).toString();
+		var token = uuid.generate();
 
 		// save token on user object
 		user.signupToken = token;
@@ -460,38 +488,27 @@ Signup.prototype.postSignupResend = function (req, res, next)
 		user.signupTokenExpires = moment().add(timespan, 'ms').toDate();
 
 		// save updated user to db
-		adapter.update(user, function (err, user)
+		adapter.update(user, function (err, u)
 			{
-				if(err) return next(err);
-
-				// send sign up email
-				var	cfg = JSON.parse(JSON.stringify(config)),
-					user = JSON.parse(JSON.stringify(u));
-					
-				if(sms.length > 1)
+				if(err)
+					return next(err);
+				else if(sms.length > 1 && that.sinchClient !== undefined)
 				{
-					cfg.emailTemplate = cfg.smsTemplate;
-					cfg.emailSignup = cfg.smsSignup;
-					user.email = cfg.smsGateway;
-					user.name = sms;
-					cfg.appname = user.signupToken;
-				}
-				
-				var mail = new Mail(cfg);
-				
-				mail.signup(user.name, user.email, user.signupToken, function (err, result)
-					{
-						if(err)
-							return next(err);
-						else
+					that.ongoingVerification = that.sinchClient.createSmsVerification(sms, u.signupToken);
+					
+					that.ongoingVerification.initiate(
+					
+						function()
 						{
+							// Succeeded
+							
 							// emit event
-							that.emit('signup::post', user);
+							that.emit('signup::post', u);
 
 							// send only JSON when REST is active
 							if(config.rest)
 								return res.send(204);
-							else if(sms.length > 1)
+							else
 							{
 								var successView = config.signup.views.smsSent || join('post-signup');
 								res.render(successView,
@@ -500,19 +517,64 @@ Signup.prototype.postSignupResend = function (req, res, next)
 										basedir: req.app.get('views')
 									});
 							}
+						},
+						function()
+						{
+							// Failed
+							return next(err);
+						});
+				}
+				else
+				{
+					// send sign up email
+					var	cfg = JSON.parse(JSON.stringify(config)),
+						user = JSON.parse(JSON.stringify(u));
+						
+					if(sms.length > 1)
+					{
+						cfg.emailTemplate = cfg.smsTemplate;
+						cfg.emailSignup = cfg.smsSignup;
+						user.email = cfg.smsGateway;
+						user.name = sms;
+						cfg.appname = user.signupToken;
+					}
+					
+					var mail = new Mail(cfg);
+					
+					mail.signup(user.name, user.email, user.signupToken, function (err, result)
+						{
+							if(err)
+								return next(err);
 							else
 							{
-								var successView = config.signup.views.signedUp || join('post-signup');
-								res.render(successView,
-									{
-										title: 'Sign up - Email sent',
-										basedir: req.app.get('views')
-									});
-							}
-						}
-					});
-			});
+								// emit event
+								that.emit('signup::post', user);
 
+								// send only JSON when REST is active
+								if(config.rest)
+									return res.send(204);
+								else if(sms.length > 1)
+								{
+									var successView = config.signup.views.smsSent || join('post-signup');
+									res.render(successView,
+										{
+											title: 'Sign up - SMS code sent',
+											basedir: req.app.get('views')
+										});
+								}
+								else
+								{
+									var successView = config.signup.views.signedUp || join('post-signup');
+									res.render(successView,
+										{
+											title: 'Sign up - Email sent',
+											basedir: req.app.get('views')
+										});
+								}
+							}
+						});
+				}
+			});
 	});
 };
 
@@ -535,96 +597,206 @@ Signup.prototype.getSignupToken = function (req, res, next)
 	var token = req.params.token;
 
 	// if format is wrong no need to query the database
-	if(!uuid.isValid(base10_to_base64(token)))
-		return next();
-
-	// find user by token
-	adapter.find('signupToken', token, function (err, user)
+	if(!uuid.isValid(token))
+	{
+		if(that.sinchClient)
 		{
-			if(err)
-				return next(err);
+			// check for sinch code
+			that.ongoingVerification.verify(token,
+			
+				function()
+				{
+					// If successful
+					// find user by token
+					adapter.find('signupToken', that.ongoingVerification.custom, function (err, user)
+						{
+							if(err)
+								return next(err);
 
-			// no user found -> forward to error handling middleware
-			if(!user)
-//				return next();
+							// no user found -> forward to error handling middleware
+							if(!user)
+				//				return next();
+							{
+								// custom or built-in view
+								var expiredView = config.signup.views.linkExpired || join('link-expired');
+
+								// render template to allow resending verification email
+								return res.render(expiredView,
+									{
+										title: 'Sign up - Authorization invalid',
+										error: 'Authorization code was not valid or has expired',
+										basedir: req.app.get('views')
+									});
+							}
+
+							// check if token has expired
+							else if(new Date(user.signupTokenExpires) < new Date())
+							{
+								// delete old token
+								delete user.signupToken;
+
+								// save updated user to db
+								adapter.update(user, function (err, user)
+									{
+										if(err)
+											return next(err);
+
+										// send only JSON when REST is active
+										if(config.rest)
+											return res.json(403, { error: 'token expired' });
+
+										// custom or built-in view
+										var expiredView = config.signup.views.linkExpired || join('link-expired');
+
+										// render template to allow resending verification email
+										res.render(expiredView,
+											{
+												title: 'Sign up - Authorization code has expired',
+												basedir: req.app.get('views')
+											});
+
+									});
+								return;
+							}
+
+							// everything seems to be fine
+
+							// set user verification values
+							user.emailVerificationTimestamp = new Date();
+							user.emailVerified = true;
+
+							// remove token and token expiration date from user object
+							delete user.signupToken;
+							delete user.signupTokenExpires;
+
+							// save user with updated values to db
+							adapter.update(user, function (err, user)
+								{
+									if(err)
+										return next(err);
+
+									// emit 'signup' event
+									that.emit('signup', user, res, req);
+
+									if(config.signup.handleResponse)
+									{
+										// send only JSON when REST is active
+										if(config.rest)
+											return res.send(204);
+
+										// custom or built-in view
+										var view = config.signup.views.verified || join('mail-verification-success');
+
+										// render email verification success view
+										res.render(view,
+											{
+												title: 'Sign up success',
+												basedir: req.app.get('views')
+											});
+									}
+								});
+						});
+				},
+				function()
+				{
+					return next();
+				});
+		}
+		else
+			return next();
+	}
+	else
+	{
+		// find user by token
+		adapter.find('signupToken', token, function (err, user)
 			{
-				// custom or built-in view
-				var expiredView = config.signup.views.linkExpired || join('link-expired');
+				if(err)
+					return next(err);
 
-				// render template to allow resending verification email
-				return res.render(expiredView,
-					{
-						title: 'Sign up - Authorization invalid',
-						error: 'Authorization code was not valid or has expired',
-						basedir: req.app.get('views')
-					});
-			}
+				// no user found -> forward to error handling middleware
+				if(!user)
+	//				return next();
+				{
+					// custom or built-in view
+					var expiredView = config.signup.views.linkExpired || join('link-expired');
 
-			// check if token has expired
-			else if(new Date(user.signupTokenExpires) < new Date())
-			{
-				// delete old token
+					// render template to allow resending verification email
+					return res.render(expiredView,
+						{
+							title: 'Sign up - Authorization invalid',
+							error: 'Authorization code was not valid or has expired',
+							basedir: req.app.get('views')
+						});
+				}
+
+				// check if token has expired
+				else if(new Date(user.signupTokenExpires) < new Date())
+				{
+					// delete old token
+					delete user.signupToken;
+
+					// save updated user to db
+					adapter.update(user, function (err, user)
+						{
+							if(err)
+								return next(err);
+
+							// send only JSON when REST is active
+							if(config.rest)
+								return res.json(403, { error: 'token expired' });
+
+							// custom or built-in view
+							var expiredView = config.signup.views.linkExpired || join('link-expired');
+
+							// render template to allow resending verification email
+							res.render(expiredView,
+								{
+									title: 'Sign up - Authorization code has expired',
+									basedir: req.app.get('views')
+								});
+
+						});
+					return;
+				}
+
+				// everything seems to be fine
+
+				// set user verification values
+				user.emailVerificationTimestamp = new Date();
+				user.emailVerified = true;
+
+				// remove token and token expiration date from user object
 				delete user.signupToken;
+				delete user.signupTokenExpires;
 
-				// save updated user to db
+				// save user with updated values to db
 				adapter.update(user, function (err, user)
 					{
 						if(err)
 							return next(err);
 
-						// send only JSON when REST is active
-						if(config.rest)
-							return res.json(403, { error: 'token expired' });
+						// emit 'signup' event
+						//console.log('emit signup event:', req);
+						
+						that.emit('signup', user, res, req);
 
-						// custom or built-in view
-						var expiredView = config.signup.views.linkExpired || join('link-expired');
+						if(config.signup.handleResponse)
+						{
+							// send only JSON when REST is active
+							if(config.rest)
+								return res.send(204);
 
-						// render template to allow resending verification email
-						res.render(expiredView,
-							{
-								title: 'Sign up - Authorization code has expired',
-								basedir: req.app.get('views')
-							});
+							// custom or built-in view
+							var view = config.signup.views.verified || join('mail-verification-success');
 
+							// render email verification success view
+							res.render(view,
+								{
+									title: 'Sign up success',
+									basedir: req.app.get('views')
+								});
+						}
 					});
-				return;
-			}
-
-			// everything seems to be fine
-
-			// set user verification values
-			user.emailVerificationTimestamp = new Date();
-			user.emailVerified = true;
-
-			// remove token and token expiration date from user object
-			delete user.signupToken;
-			delete user.signupTokenExpires;
-
-			// save user with updated values to db
-			adapter.update(user, function (err, user)
-				{
-					if(err)
-						return next(err);
-
-					// emit 'signup' event
-					that.emit('signup', user, res);
-
-					if(config.signup.handleResponse)
-					{
-						// send only JSON when REST is active
-						if(config.rest)
-							return res.send(204);
-
-						// custom or built-in view
-						var view = config.signup.views.verified || join('mail-verification-success');
-
-						// render email verification success view
-						res.render(view,
-							{
-								title: 'Sign up success',
-								basedir: req.app.get('views')
-							});
-					}
-				});
-		});
+			});
+	}
 };
