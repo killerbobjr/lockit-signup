@@ -140,10 +140,19 @@ Signup.prototype.postSignup = function (req, res, next)
 	}
 	else if(sms.length > 1)
 	{
-		if(that.sinchClient === undefined)
-			sms = phone(sms)[0].replace(/\D/g,'');	// Strip the '+' character node-phone puts in
+		if(phone(sms)[0] === undefined)
+		{
+			error = 'You have entered an invalid phone number';
+		}
+		else
+		{
+			if(that.sinchClient !== undefined)
+				sms = phone(sms)[0].replace(/\D/g,'');	// Strip the '+' character node-phone puts in
+			else
+				sms = phone(sms)[0];
+		}
 	}
-
+	
 	// custom or built-in view
 	var errorView = config.signup.views.signup || join('get-signup');
 
