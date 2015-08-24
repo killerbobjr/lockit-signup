@@ -28,7 +28,7 @@
     "ms": "^0.6.2",
     "phone": "^1.0.4",
     "shortid": "^2.2.2",
-    "sinch-rtc": "git://github.com/killerbobjr/sinch-js-rtc-node.git"
+    "twilio": "^2.2.1"
   },
   "devDependencies": {
     "body-parser": "^1.9.0",

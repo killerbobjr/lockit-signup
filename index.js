@@ -8,7 +8,7 @@ var moment = require('moment');
 var Mail = require('lockit-sendmail');
 var async = require('async');
 var phone = require('phone');
-var sinchrtc = require('sinch-rtc');
+var twilio = require("twilio");
 
 /**
  * Internal helper functions
@@ -47,25 +47,12 @@ var Signup = module.exports = function (config, adapter)
 	router.post(route + '/resend-verification', this.postSignupResend.bind(this));
 	router.get(route + '/:token', this.getSignupToken.bind(this));
 	this.router = router;
-	
-	//console.log('config.sinchApplicationkey:', config.sinchApplicationkey);
-	
-	if(config.sinchApplicationkey !== undefined)
+
+	if(config.twilioSid !== undefined)
 	{
-		this.sinchClient = new sinchrtc(
-		{
-			applicationKey: config.sinchApplicationkey,
-			//Note: For additional logging, please uncomment the three rows below
-			onLogMessage: function(message)
-			{
-				//console.log('sinchClient:', message);
-			}
-		});
-		
-		//console.log('sinchClient initialized:', that.sinchClient);
-		
-		this.ongoingVerification = null;
+		this.twilioClient = twilio(config.twilioSid, config.twilioToken);
 	}
+	
 };
 
 util.inherits(Signup, events.EventEmitter);
@@ -146,10 +133,7 @@ Signup.prototype.postSignup = function (req, res, next)
 		}
 		else
 		{
-			if(that.sinchClient !== undefined)
-				sms = phone(sms)[0].replace(/\D/g,'');	// Strip the '+' character node-phone puts in
-			else
-				sms = phone(sms)[0];
+			sms = phone(sms)[0];
 		}
 	}
 	
@@ -237,38 +221,54 @@ Signup.prototype.postSignup = function (req, res, next)
 					{
 						if(err)
 							return next(err);
-						else if(sms.length > 1 && that.sinchClient !== undefined)
+						else if(sms.length > 1 && that.twilioClient !== undefined)
 						{
-							that.ongoingVerification = that.sinchClient.createSmsVerification(sms, u.signupToken);
-							
-							that.ongoingVerification.initiate(
-							
-								function()
+							that.twilioClient.messages.create(
 								{
-									// Succeeded
-									
-									// emit event
-									that.emit('signup::post', user);
-
-									// send only JSON when REST is active
-									if(config.rest)
-										return res.send(204);
-									else
+									to: sms,
+									from: config.twilioNumber,
+									body: config.twilioMessage + ' ' + u.signupToken
+								},
+								function(err, message)
+								{
+									if (err)
 									{
-										var successView = config.signup.views.smsSent || join('post-signup');
-										res.render(successView,
+										console.log('twilio error:', err, ', message:', message);
+										// do not handle the route when REST is active
+										if(that.config.rest)
+											return next();
+
+										// custom or built-in view
+										var view = that.config.signup.views.resend || join('resend-verification');
+
+										res.render(view,
 											{
-												title: 'Sign up - SMS code sent',
+												title: 'Resend verification email',
+												error: err.message,
 												basedir: req.app.get('views')
 											});
 									}
-								},
-								function()
-								{
-									// Failed
-									return next(err);
+									else
+									{
+										console.log('twilio success');
+										
+										// emit event
+										that.emit('signup::post', u);
+
+										// send only JSON when REST is active
+										if(config.rest)
+											return res.send(204);
+										else
+										{
+											var successView = config.signup.views.smsSent || join('post-signup');
+											res.render(successView,
+												{
+													title: 'Sign up - SMS code sent',
+													basedir: req.app.get('views')
+												});
+										}
+									}
 								});
-							
 						}
 						else
 						{
@@ -501,36 +501,53 @@ Signup.prototype.postSignupResend = function (req, res, next)
 			{
 				if(err)
 					return next(err);
-				else if(sms.length > 1 && that.sinchClient !== undefined)
+				else if(sms.length > 1 && that.twilioClient !== undefined)
 				{
-					that.ongoingVerification = that.sinchClient.createSmsVerification(sms, u.signupToken);
-					
-					that.ongoingVerification.initiate(
-					
-						function()
+					that.twilioClient.messages.create(
 						{
-							// Succeeded
-							
-							// emit event
-							that.emit('signup::post', u);
-
-							// send only JSON when REST is active
-							if(config.rest)
-								return res.send(204);
-							else
+							to: sms,
+							from: config.twilioNumber,
+							body: config.twilioMessage + ' ' + u.signupToken
+						},
+						function(err, message)
+						{
+							if (err)
 							{
-								var successView = config.signup.views.smsSent || join('post-signup');
-								res.render(successView,
+								console.log('twilio error:', err, ', message:', message);
+								// do not handle the route when REST is active
+								if(that.config.rest)
+									return next();
+
+								// custom or built-in view
+								var view = that.config.signup.views.resend || join('resend-verification');
+
+								res.render(view,
 									{
-										title: 'Sign up - SMS code sent',
+										title: 'Resend verification email',
+										error: err.message,
 										basedir: req.app.get('views')
 									});
 							}
-						},
-						function()
-						{
-							// Failed
-							return next(err);
+							else
+							{
+								console.log('twilio success');
+								
+								// emit event
+								that.emit('signup::post', u);
+
+								// send only JSON when REST is active
+								if(config.rest)
+									return res.send(204);
+								else
+								{
+									var successView = config.signup.views.smsSent || join('post-signup');
+									res.render(successView,
+										{
+											title: 'Sign up - SMS code sent',
+											basedir: req.app.get('views')
+										});
+								}
+							}
 						});
 				}
 				else
@@ -608,111 +625,16 @@ Signup.prototype.getSignupToken = function (req, res, next)
 	// if format is wrong no need to query the database
 	if(!uuid.isValid(token))
 	{
-		if(that.sinchClient)
-		{
-			// check for sinch code
-			that.ongoingVerification.verify(token,
-			
-				function()
-				{
-					// If successful
-					// find user by token
-					adapter.find('signupToken', that.ongoingVerification.custom, function (err, user)
-						{
-							if(err)
-								return next(err);
+		// custom or built-in view
+		var expiredView = config.signup.views.linkExpired || join('link-expired');
 
-							// no user found -> forward to error handling middleware
-							if(!user)
-				//				return next();
-							{
-								// custom or built-in view
-								var expiredView = config.signup.views.linkExpired || join('link-expired');
-
-								// render template to allow resending verification email
-								return res.render(expiredView,
-									{
-										title: 'Sign up - Authorization invalid',
-										error: 'Authorization code was not valid or has expired',
-										basedir: req.app.get('views')
-									});
-							}
-
-							// check if token has expired
-							else if(new Date(user.signupTokenExpires) < new Date())
-							{
-								// delete old token
-								delete user.signupToken;
-
-								// save updated user to db
-								adapter.update(user, function (err, user)
-									{
-										if(err)
-											return next(err);
-
-										// send only JSON when REST is active
-										if(config.rest)
-											return res.json(403, { error: 'token expired' });
-
-										// custom or built-in view
-										var expiredView = config.signup.views.linkExpired || join('link-expired');
-
-										// render template to allow resending verification email
-										res.render(expiredView,
-											{
-												title: 'Sign up - Authorization code has expired',
-												basedir: req.app.get('views')
-											});
-
-									});
-								return;
-							}
-
-							// everything seems to be fine
-
-							// set user verification values
-							user.emailVerificationTimestamp = new Date();
-							user.emailVerified = true;
-
-							// remove token and token expiration date from user object
-							delete user.signupToken;
-							delete user.signupTokenExpires;
-
-							// save user with updated values to db
-							adapter.update(user, function (err, user)
-								{
-									if(err)
-										return next(err);
-
-									// emit 'signup' event
-									that.emit('signup', user, res, req);
-
-									if(config.signup.handleResponse)
-									{
-										// send only JSON when REST is active
-										if(config.rest)
-											return res.send(204);
-
-										// custom or built-in view
-										var view = config.signup.views.verified || join('mail-verification-success');
-
-										// render email verification success view
-										res.render(view,
-											{
-												title: 'Sign up success',
-												basedir: req.app.get('views')
-											});
-									}
-								});
-						});
-				},
-				function()
-				{
-					return next();
-				});
-		}
-		else
-			return next();
+		// render template to allow resending verification email
+		return res.render(expiredView,
+			{
+				title: 'Sign up - Authorization invalid',
+				error: 'Authorization code was not valid or has expired',
+				basedir: req.app.get('views')
+			});
 	}
 	else
 	{
