@@ -101,7 +101,7 @@ Signup.prototype.postSignup = function (req, res, next)
 	var error = null;
 	// regexp from https://github.com/angular/angular.js/blob/master/src/ng/directive/input.js#L4
 	var EMAIL_REGEXP = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,6}$/;
-	var NAME_REGEXP = /^[\x20a-z0-9_-]{3,50}$/;
+	var NAME_REGEXP = /^[\x20a-z0-9._%+-@]{3,50}$/;
 
 	console.log('signup-----------------------------');
 	// check for valid inputs
