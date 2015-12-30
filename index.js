@@ -101,7 +101,7 @@ Signup.prototype.postSignup = function (req, res, next)
 	var error = null;
 	// regexp from https://github.com/angular/angular.js/blob/master/src/ng/directive/input.js#L4
 	var EMAIL_REGEXP = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,6}$/;
-	var NAME_REGEXP = /^[\x20a-z0-9._%+-@]{3,50}$/;
+	var NAME_REGEXP = /^[\x20A-Za-z0-9._%+-@]{3,50}$/;
 
 	console.log('signup-----------------------------');
 	// check for valid inputs
@@ -111,7 +111,7 @@ Signup.prototype.postSignup = function (req, res, next)
 	}
 	else if(!name.match(NAME_REGEXP))
 	{
-		error = 'Must be between 3 to 50 characters containing only A-Z, a-z, 0-9, - _ or space';
+		error = 'Must be between 3 to 50 characters containing only A-Z, a-z, 0-9, ._%+-@ or space';
 		//  } else if (name !== name.toLowerCase()) {
 		//    error = 'Username must be lowercase';
 		//  } else if (!name.charAt(0).match(/[a-z]/)) {
