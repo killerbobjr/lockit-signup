@@ -487,7 +487,7 @@ Signup.prototype.postSignupResend = function (req, res, next)
 		// we have an existing user with provided email address
 
 		// Remove error prone similar text characters
-		uuid.characters('0123456789abcdefghijk+mnopqrstuvwxyzABCDEFGH=JKLMN?PQRSTUVWXYZ_-');
+		uuid.characters('0*23456789abcdefghijk+mnopqrstuvwxyzABCDEFGH=JKLMN?PQRSTUVWXYZ_-');
 		// create new signup token
 		var token = uuid.generate();
 
