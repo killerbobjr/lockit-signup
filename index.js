@@ -93,7 +93,7 @@ Signup.prototype.postSignup = function (req, res, next)
 	var adapter = this.adapter;
 	var that = this;
 
-	var name = req.body.name;
+	var name = req.body.name || req.body.email;
 	var email = req.body.email;
 	var password = req.body.password;
 	var sms = req.body.phone;
