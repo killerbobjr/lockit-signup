@@ -53,6 +53,8 @@ var Signup = module.exports = function (config, adapter)
 		this.twilioClient = twilio(config.twilioSid, config.twilioToken);
 	}
 	
+	// Remove error prone similar text characters
+	uuid.characters('0123456789abcdefghijk.mnopqrstuvwxyzABCDEFGH~JKLMNOPQRSTUVWXYZ_-');
 };
 
 util.inherits(Signup, events.EventEmitter);
@@ -486,8 +488,6 @@ Signup.prototype.postSignupResend = function (req, res, next)
 
 		// we have an existing user with provided email address
 
-		// Remove error prone similar text characters
-		uuid.characters('0123456789abcdefghijk.mnopqrstuvwxyzABCDEFGH~JKLMNOPQRSTUVWXYZ_-');
 		// create new signup token
 		var token = uuid.generate();
 
