@@ -28,6 +28,8 @@ function join(view)
 var Signup = module.exports = function (config, adapter)
 {
 	var that = this;
+	// Remove error prone similar text characters
+	uuid.characters('0123456789abcdefghijk.mnopqrstuvwxyzABCDEFGH~JKLMNOPQRSTUVWXYZ_-');
 	
 	if(!(this instanceof Signup))
 		return new Signup(config, adapter);
@@ -486,10 +488,6 @@ Signup.prototype.postSignupResend = function (req, res, next)
 		// we have an existing user with provided email address
 
 		// create new signup token
-	
-		// Remove error prone similar text characters
-		uuid.characters('0123456789abcdefghijk.mnopqrstuvwxyzABCDEFGH~JKLMNOPQRSTUVWXYZ_-');
-		
 		var token = uuid.generate();
 
 		// save token on user object
@@ -626,10 +624,6 @@ Signup.prototype.getSignupToken = function (req, res, next)
 	var token = req.params.token;
 
 	// if format is wrong no need to query the database
-	
-	// Remove error prone similar text characters
-	uuid.characters('0123456789abcdefghijk.mnopqrstuvwxyzABCDEFGH~JKLMNOPQRSTUVWXYZ_-');
-	
 	if(!uuid.isValid(token))
 	{
 		// custom or built-in view
