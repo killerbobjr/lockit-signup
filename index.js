@@ -104,7 +104,6 @@ Signup.prototype.postSignup = function (req, res, next)
 	var EMAIL_REGEXP = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,6}$/;
 	var NAME_REGEXP = /^[\x20A-Za-z0-9._%+-@]{3,50}$/;
 
-	console.log('signup-----------------------------');
 	// check for valid inputs
 	if(!name || !email || !password)
 	{
@@ -218,7 +217,7 @@ Signup.prototype.postSignup = function (req, res, next)
 			else
 			{
 				// save new user to db
-				adapter.save(name, email, password, function (err, u)
+				adapter.save(name, email, password, function (err, user)
 					{
 						if(err)
 							return next(err);
@@ -228,7 +227,7 @@ Signup.prototype.postSignup = function (req, res, next)
 								{
 									to: sms,
 									from: config.twilioNumber,
-									body: config.twilioMessage + ' ' + u.signupToken
+									body: config.twilioMessage + ' ' + user.signupToken
 								},
 								function(err, message)
 								{
@@ -254,7 +253,7 @@ Signup.prototype.postSignup = function (req, res, next)
 										console.log('twilio success');
 										
 										// emit event
-										that.emit('signup::post', u);
+										that.emit('signup::post', user);
 
 										// send only JSON when REST is active
 										if(config.rest)
@@ -274,7 +273,7 @@ Signup.prototype.postSignup = function (req, res, next)
 						else
 						{
 							// send email with link for address verification
-							//console.log('config: ', config);
+							//console.log('signup config: ', user);
 
 							// This is a lazy hack that avoids modifying lockit-sendmail
 							// so we can utilize sms email gateways. A better way is to
@@ -282,8 +281,7 @@ Signup.prototype.postSignup = function (req, res, next)
 							// authorize code through there if a phone number is provided.
 							// That way, third party sms modules can be easily integrated.
 							
-							var	cfg = JSON.parse(JSON.stringify(config)),
-								user = JSON.parse(JSON.stringify(u));
+							var	cfg = JSON.parse(JSON.stringify(config));
 								
 							if(sms.length > 1)
 							{
