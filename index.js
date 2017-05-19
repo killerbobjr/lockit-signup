@@ -94,47 +94,25 @@ Signup.prototype.postSignup = function (req, res, next)
 	var adapter = this.adapter;
 	var that = this;
 
-	var name = req.body.name || req.body.email;
+	var name = req.body.email;
 	var email = req.body.email;
 	var password = req.body.password;
-	var sms = req.body.phone;
 
 	var error = null;
+	var forgot = false;
+
 	// regexp from https://github.com/angular/angular.js/blob/master/src/ng/directive/input.js#L4
 	var EMAIL_REGEXP = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,6}$/;
 	var NAME_REGEXP = /^[\x20A-Za-z0-9._%+-@]{3,50}$/;
 
 	// check for valid inputs
-	if(!name || !email || !password)
+	if(!email || !password)
 	{
 		error = 'All fields are required!';
-	}
-	else if(!name.match(NAME_REGEXP))
-	{
-		error = 'Must be between 3 to 50 characters containing only A-Z, a-z, 0-9, ._%+-@ or space';
-		//  } else if (name !== name.toLowerCase()) {
-		//    error = 'Username must be lowercase';
-		//  } else if (!name.charAt(0).match(/[a-z]/)) {
-		//    error = 'Username has to start with a lowercase letter (a-z)';
 	}
 	else if(!email.match(EMAIL_REGEXP))
 	{
 		error = 'You have entered an invalid email address';
-	}
-	else if(sms.length > 1 && phone(sms)[0] === undefined)
-	{
-		error = 'You have entered an invalid phone number';
-	}
-	else if(sms.length > 1)
-	{
-		if(phone(sms)[0] === undefined)
-		{
-			error = 'You have entered an invalid phone number';
-		}
-		else
-		{
-			sms = phone(sms)[0];
-		}
 	}
 	
 	// custom or built-in view
@@ -154,18 +132,12 @@ Signup.prototype.postSignup = function (req, res, next)
 				error: error,
 				basedir: req.app.get('views'),
 				name: name,
-				email: email,
-				phone: sms
+				email: email
 			});
 		return;
 	}
 
 	var checks = [];
-	checks.push(
-		{
-			value: 'name',
-			data: name
-		});
 	checks.push(
 		{
 			value: 'email',
@@ -181,9 +153,12 @@ Signup.prototype.postSignup = function (req, res, next)
 				else if(user !== undefined && user !== null)
 				{
 					if(user.accountInvalid)
-						error = 'That account ' + check.value + ' cannot be used';
+						error = 'That account ' + check.value + ' has been deactivated';
 					else
-						error = 'That account ' + check.value + ' already exists';
+					{
+						error = 'That account ' + check.value + ' already exists!';
+						forgot = true;
+					}
 					nextasync();
 				}
 				else
@@ -209,7 +184,8 @@ Signup.prototype.postSignup = function (req, res, next)
 							basedir: req.app.get('views'),
 							name: name,
 							email: email,
-							phone: sms
+							login: email,
+							forgot: forgot
 						});
 					return;
 				}
@@ -221,113 +197,28 @@ Signup.prototype.postSignup = function (req, res, next)
 					{
 						if(err)
 							return next(err);
-						else if(sms.length > 1 && that.twilioClient !== undefined)
-						{
-							that.twilioClient.messages.create(
-								{
-									to: sms,
-									from: config.twilioNumber,
-									body: config.twilioMessage + ' ' + user.signupToken
-								},
-								function(err, message)
-								{
-									if (err)
-									{
-										console.log('twilio error:', err, ', message:', message);
-										// do not handle the route when REST is active
-										if(that.config.rest)
-											return next();
-
-										// custom or built-in view
-										var view = that.config.signup.views.resend || join('resend-verification');
-
-										res.render(view,
-											{
-												title: 'Resend verification email',
-												error: err.message,
-												basedir: req.app.get('views')
-											});
-									}
-									else
-									{
-										console.log('twilio success');
-										
-										// emit event
-										that.emit('signup::post', user);
-
-										// send only JSON when REST is active
-										if(config.rest)
-											return res.send(204);
-										else
-										{
-											var successView = config.signup.views.smsSent || join('post-signup');
-											res.render(successView,
-												{
-													title: 'Sign up - SMS code sent',
-													basedir: req.app.get('views')
-												});
-										}
-									}
-								});
-						}
 						else
 						{
-							// send email with link for address verification
-							//console.log('signup config: ', user);
+							that.emit('signedup', user, res, req);
 
-							// This is a lazy hack that avoids modifying lockit-sendmail
-							// so we can utilize sms email gateways. A better way is to
-							// create a dedicated lockit-sms module and route the
-							// authorize code through there if a phone number is provided.
-							// That way, third party sms modules can be easily integrated.
-							
-							var	cfg = JSON.parse(JSON.stringify(config));
-								
-							if(sms.length > 1)
+							if(config.signup.handleResponse)
 							{
-								cfg.emailTemplate = cfg.smsTemplate;
-								cfg.emailSignup = cfg.smsSignup;
-								user.email = cfg.smsGateway;
-								user.name = sms;			// Phone number
-								cfg.appname = user.signupToken;	// Crowbar authorize code into here
-							}
-							var mail = new Mail(cfg);
-							
-							mail.signup(user.name, user.email, user.signupToken, function (err, result)
-								{
-									if(err)
-										return next(err);
-									else
-									{
-										// emit event
-										that.emit('signup::post', user);
+								// send only JSON when REST is active
+								if(config.rest)
+									return res.send(204);
 
-										// send only JSON when REST is active
-										if(config.rest)
-											return res.send(204);
-										else if(sms.length > 1)
-										{
-											var successView = config.signup.views.smsSent || join('post-signup');
-											res.render(successView,
-												{
-													title: 'Sign up - SMS code sent',
-													basedir: req.app.get('views')
-												});
-										}
-										else
-										{
-											var successView = config.signup.views.signedUp || join('post-signup');
-											res.render(successView,
-												{
-													title: 'Sign up - Email sent',
-													basedir: req.app.get('views')
-												});
-										}
-									}
-								});
+								// custom or built-in view
+								var view = config.signup.views.signedup || join('mail-verification-success');
+
+								// render email verification success view
+								res.render(view,
+									{
+										title: 'Sign up success',
+										basedir: req.app.get('views')
+									});
+							}
 						}
 					});
-
 			}
 		});
 };
@@ -708,7 +599,7 @@ Signup.prototype.getSignupToken = function (req, res, next)
 						// emit 'signup' event
 						//console.log('emit signup event:', req);
 						
-						that.emit('signup', user, res, req);
+						that.emit('verified', user, res, req);
 
 						if(config.signup.handleResponse)
 						{
