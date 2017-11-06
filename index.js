@@ -28,8 +28,6 @@ function join(view)
 var Signup = module.exports = function (config, adapter)
 {
 	var that = this;
-	// Remove error prone similar text characters
-	uuid.characters('0123456789abcdefghijk.mnopqrstuvwxyzABCDEFGH~JKLMNOPQRSTUVWXYZ_-');
 	
 	if(!(this instanceof Signup))
 		return new Signup(config, adapter);
