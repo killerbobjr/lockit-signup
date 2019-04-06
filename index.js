@@ -166,11 +166,11 @@ Signup.prototype.postSignup = function (req, res, next)
 					{
 						if(user.accountInvalid)
 						{
-							error = 'That account ' + check.value + ' has been deactivated';
+							error = 'The ' + check.value + ' "' + user.email + '" has been deactivated';
 						}
 						else
 						{
-							error = 'That account ' + check.value + ' already exists!';
+							error = 'The ' + check.value + ' "' + user.email + '" is already signed up.';
 							forgot = true;
 						}
 						nextasync();
