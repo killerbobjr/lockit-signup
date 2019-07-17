@@ -107,6 +107,14 @@ Signup.prototype.postSignup = function (req, res, next)
 	var error = null;
 	var forgot = false;
 
+	// Custom for our app
+	var	basequery = {};
+	if(res.locals && res.locals.basequery)
+	{
+		basequery = res.locals.basequery;
+	}
+
+
 	// regexp from https://github.com/angular/angular.js/blob/master/src/ng/directive/input.js#L4
 	var EMAIL_REGEXP = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,6}$/;
 	var NAME_REGEXP = /^[\x20A-Za-z0-9._%+-@]{3,50}$/;
@@ -179,7 +187,7 @@ Signup.prototype.postSignup = function (req, res, next)
 					{
 						nextasync();
 					}
-				});
+				}, basequery);
 			},
 			function (err)
 			{
@@ -331,6 +339,14 @@ Signup.prototype.postSignupResend = function (req, res, next)
 	}
 	else
 	{
+
+	// Custom for our app
+	var	basequery = {};
+	if(res.locals && res.locals.basequery)
+	{
+		basequery = res.locals.basequery;
+	}
+
 		// check for user with given email address
 		adapter.find('email', email, function (err, user)
 			{
@@ -643,7 +659,7 @@ Signup.prototype.postSignupResend = function (req, res, next)
 						}
 					}
 				}
-			});
+			}, basequery);
 	}
 };
 
@@ -687,6 +703,14 @@ Signup.prototype.getSignupToken = function (req, res, next)
 			}
 			else
 			{
+
+	// Custom for our app
+	var	basequery = {};
+	if(res.locals && res.locals.basequery)
+	{
+		basequery = res.locals.basequery;
+	}
+
 				// find user by token
 				adapter.find('signupToken', token, function (err, user)
 					{
@@ -807,7 +831,7 @@ Signup.prototype.getSignupToken = function (req, res, next)
 									});
 							}
 						}
-					});
+					}, basequery);
 			}
 		}
 		else
