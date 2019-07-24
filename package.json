@@ -22,13 +22,13 @@
   },
   "license": "MIT",
   "dependencies": {
-    "async": "^2.2.0",
+    "async": "^3.1.0",
     "lockit-sendmail": "git://github.com/killerbobjr/lockit-sendmail.git",
     "moment": "^2.18.1",
     "ms": "^1.0.0",
     "phone": "^1.0.9",
     "shortid": "git://github.com/killerbobjr/shortid.git",
-    "twilio": "^2.11.1"
+    "twilio": "^3.33.1"
   },
   "devDependencies": {
     "body-parser": "^1.17.1",
@@ -42,11 +42,11 @@
     "grunt": "^1.0.1",
     "grunt-contrib-jshint": "^1.1.0",
     "grunt-mocha-test": "^0.13.2",
-    "jade": "^1.11.0",
+    "pug": "^2.0.4",
     "lockit-couchdb-adapter": "git://github.com/killerbobjr/lockit-couchdb-adapter.git",
     "lockit-template-blank": "git://github.com/killerbobjr/lockit-template-blank.git",
     "lockit-utils": "git://github.com/killerbobjr/lockit-utilities.git",
-    "mocha": "^3.2.0",
+    "mocha": "^6.2.0",
     "nano": "^6.2.0",
     "nodemailer-stub-transport": "^1.1.0",
     "should": "^11.2.1",
