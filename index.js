@@ -704,12 +704,12 @@ Signup.prototype.getSignupToken = function (req, res, next)
 			else
 			{
 
-	// Custom for our app
-	var	basequery = {};
-	if(res.locals && res.locals.basequery)
-	{
-		basequery = res.locals.basequery;
-	}
+				// Custom for our app
+				var	basequery = {};
+				if(res.locals && res.locals.basequery)
+				{
+					basequery = res.locals.basequery;
+				}
 
 				// find user by token
 				adapter.find('signupToken', token, function (err, user)
