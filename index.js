@@ -100,12 +100,13 @@ Signup.prototype.postSignup = function (req, res, next)
 	var adapter = this.adapter;
 	var that = this;
 
-	var name = req.body.email;
+	var name = req.body.name;
 	var email = req.body.email;
 	var password = req.body.password;
 
 	var error = null;
 	var forgot = false;
+	var useLogin = false;
 
 	// Custom for our app
 	var	basequery = {};
@@ -114,19 +115,33 @@ Signup.prototype.postSignup = function (req, res, next)
 		basequery = res.locals.basequery;
 	}
 
-
 	// regexp from https://github.com/angular/angular.js/blob/master/src/ng/directive/input.js#L4
 	var EMAIL_REGEXP = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,6}$/;
 	var NAME_REGEXP = /^[\x20A-Za-z0-9._%+-@]{3,50}$/;
 
 	// check for valid inputs
-	if(!email || !password)
+	if(!password)
 	{
-		error = 'All fields are required!';
+		error = 'A password is required!';
+	}
+	else if(!name && !email)
+	{
+		error = 'A user name or email is required!';
+	}
+	else if(name && !email)
+	{
+		if(!name.match(NAME_REGEXP))
+		{
+			error = 'You have entered an invalid name!';
+		}
+		else
+		{
+			error = null;
+		}
 	}
 	else if(!email.match(EMAIL_REGEXP))
 	{
-		error = 'You have entered an invalid email address';
+		error = 'You have entered an invalid email address!';
 	}
 	
 	// custom or built-in view
@@ -156,19 +171,29 @@ Signup.prototype.postSignup = function (req, res, next)
 	else
 	{
 		var checks = [];
-		checks.push(
-			{
-				value: 'email',
-				data: email
-			});
-
+		if(email)
+		{
+			checks.push(
+				{
+					value: 'email',
+					data: email
+				});
+		}
+		if(name)
+		{
+			checks.push(
+				{
+					value: 'name',
+					data: name
+				});
+		}
 		async.each(checks, function (check, nextasync)
 			{
 				adapter.find(check.value, check.data, function (err, user)
 				{
 					if(err)
 					{
-						next(err);
+						return nextasync(err);
 					}
 					else if(user !== undefined && user !== null)
 					{
@@ -178,10 +203,18 @@ Signup.prototype.postSignup = function (req, res, next)
 						}
 						else
 						{
-							error = 'The ' + check.value + ' "' + user.email + '" is already signed up.';
+							if(check.value === 'email')
+							{
+								error = 'The email account "' + user.email + '" is already signed up.';
+							}
+							else
+							{
+								error = 'The user "' + user.name + '" is already signed up.';
+							}
+							useLogin = config.signup.useLogin;
 							forgot = true;
 						}
-						nextasync();
+						return nextasync();
 					}
 					else
 					{
@@ -197,24 +230,32 @@ Signup.prototype.postSignup = function (req, res, next)
 				}
 				else if(typeof error === 'string')
 				{
-					if(config.rest)
+					if(useLogin)
 					{
-						res.json(403, { error: error });
+						config.rerouted = true;
+						res.redirect(307, config.login.route);
 					}
 					else
 					{
-						// render template with error message
-						res.status(403);
-						res.render(errorView,
-							{
-								title: 'Sign up',
-								error: error,
-								basedir: req.app.get('views'),
-								name: name,
-								email: email,
-								login: email,
-								forgot: forgot
-							});
+						if(config.rest)
+						{
+							res.json(403, { error: error });
+						}
+						else
+						{
+							// render template with error message
+							res.status(403);
+							res.render(errorView,
+								{
+									title: 'Sign up',
+									error: error,
+									basedir: req.app.get('views'),
+									name: name,
+									email: email,
+									login: email,
+									forgot: forgot
+								});
+						}
 					}
 				}
 				else
