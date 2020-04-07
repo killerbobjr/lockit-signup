@@ -338,6 +338,7 @@ Signup.prototype.postSignupResend = function (req, res, next)
 		adapter = this.adapter,
 		that = this,
 		email = req.body.email,
+		name = req.body.name,
 		sms = req.body.phone,
 		error = '',
 		// regexp from https://github.com/angular/angular.js/blob/master/src/ng/directive/input.js#L4
@@ -347,13 +348,16 @@ Signup.prototype.postSignupResend = function (req, res, next)
 	{
 		error = 'Email is invalid';
 	}
-	else if(sms.length > 1 && phone(sms)[0] === undefined)
+	else if(sms !== undefined)
 	{
-		error = 'You have entered an invalid phone number';
-	}
-	else if(sms.length > 1)
-	{
-		sms = phone(sms)[0].replace(/\D/g,'');	// Strip the '+' character node-phone leaves in
+		if(sms.length > 1 && phone(sms)[0] === undefined)
+		{
+			error = 'You have entered an invalid phone number';
+		}
+		else if(sms.length > 1)
+		{
+			sms = phone(sms)[0].replace(/\D/g,'');	// Strip the '+' character node-phone leaves in
+		}
 	}
 
 	if(error.length > 0)
@@ -380,16 +384,15 @@ Signup.prototype.postSignupResend = function (req, res, next)
 	}
 	else
 	{
-
-	// Custom for our app
-	var	basequery = {};
-	if(res.locals && res.locals.basequery)
-	{
-		basequery = res.locals.basequery;
-	}
+		// Custom for our app
+		var	basequery = {};
+		if(res.locals && res.locals.basequery)
+		{
+			basequery = res.locals.basequery;
+		}
 
 		// check for user with given email address
-		adapter.find('email', email, function (err, user)
+		adapter.find(name !== undefined?'name':'email', name !== undefined?name:email, function (err, user)
 			{
 				if(err)
 				{
@@ -577,6 +580,9 @@ Signup.prototype.postSignupResend = function (req, res, next)
 							// set new sign up token expiration date
 							var timespan = ms(config.signup.tokenExpiration);
 							user.signupTokenExpires = moment().add(timespan, 'ms').toDate();
+							
+							// If we're doing an email verification, save that temporarily
+							user.email = email;
 
 							// save updated user to db
 							adapter.update(user, function (err, user)
@@ -588,7 +594,7 @@ Signup.prototype.postSignupResend = function (req, res, next)
 									else
 									{
 										// Using phone number for verification?
-										if(sms.length > 1 && that.twilioClient !== undefined)
+										if(sms !== undefined && sms.length > 1 && that.twilioClient !== undefined)
 										{
 											that.twilioClient.messages.create(
 												{
