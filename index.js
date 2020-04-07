@@ -449,7 +449,7 @@ Signup.prototype.postSignupResend = function (req, res, next)
 						if(user.emailVerified)
 						{
 							// Check if we're verifying the phone number
-							if(sms.length > 1 && that.twilioClient !== undefined)
+							if(sms !== undefined && sms.length > 1 && that.twilioClient !== undefined)
 							{
 								// create new signup token
 								var token = uuid.generate();
