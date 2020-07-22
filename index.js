@@ -340,6 +340,7 @@ Signup.prototype.postSignupResend = function (req, res, next)
 		email = req.body.email,
 		name = req.body.name,
 		sms = req.body.phone,
+		command = req.body.command,	// command to return after success
 		error = '',
 		// regexp from https://github.com/angular/angular.js/blob/master/src/ng/directive/input.js#L4
 		EMAIL_REGEXP = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,6}$/;
@@ -508,7 +509,7 @@ Signup.prototype.postSignupResend = function (req, res, next)
 														console.log('twilio success');
 														
 														// emit event
-														that.emit('signup::post', user);
+														that.emit('signup::post', user, command);
 
 														// send only JSON when REST is active
 														if(config.rest)
@@ -518,6 +519,7 @@ Signup.prototype.postSignupResend = function (req, res, next)
 														else
 														{
 															var successView = config.signup.views.smsSent || join('post-signup');
+															res.locals.command = command;
 															res.render(successView,
 																{
 																	title: 'SMS code sent',
@@ -643,7 +645,7 @@ Signup.prototype.postSignupResend = function (req, res, next)
 																	console.log('twilio success');
 																	
 																	// emit event
-																	that.emit('signup::post', user);
+																	that.emit('signup::post', user, command);
 
 																	// send only JSON when REST is active
 																	if(config.rest)
@@ -653,6 +655,7 @@ Signup.prototype.postSignupResend = function (req, res, next)
 																	else
 																	{
 																		var successView = config.signup.views.smsSent || join('post-signup');
+																		res.locals.command = command;
 																		res.render(successView,
 																			{
 																				title: 'SMS code sent',
@@ -682,7 +685,7 @@ Signup.prototype.postSignupResend = function (req, res, next)
 													else
 													{
 														// emit event
-														that.emit('signup::post', use);
+														that.emit('signup::post', use, command);
 
 														// send only JSON when REST is active
 														if(config.rest)
@@ -692,6 +695,7 @@ Signup.prototype.postSignupResend = function (req, res, next)
 														else
 														{
 															var successView = config.signup.views.signedUp || join('post-signup');
+															res.locals.command = command;
 															res.render(successView,
 																{
 																	title: 'Email sent',
@@ -725,6 +729,7 @@ Signup.prototype.getSignupToken = function (req, res, next)
 	var	config = this.config,
 		adapter = this.adapter,
 		that = this,
+		command = req.query.command,
 		token = req.params.token;
 
 	// Reset alphabet
@@ -866,6 +871,10 @@ Signup.prototype.getSignupToken = function (req, res, next)
 													// custom or built-in view
 													var view = config.signup.views.verified || join('mail-verification-success');
 
+													if(command)
+													{
+														res.locals.command = command;
+													}
 													// render email verification success view
 													res.render(view,
 														{
