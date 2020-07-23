@@ -9,6 +9,7 @@ var Mail = require('lockit-sendmail');
 var async = require('async');
 var phone = require('phone');
 var twilio = require("twilio");
+var debug = require('debug')('lockit');
 
 /**
  * Internal helper functions
@@ -375,6 +376,7 @@ Signup.prototype.postSignupResend = function (req, res, next)
 
 			// render template with error message
 			res.status(403);
+			res.locals.command = command;
 			res.render(errorView,
 				{
 					title: 'Resend verification email',
@@ -462,74 +464,116 @@ Signup.prototype.postSignupResend = function (req, res, next)
 								var timespan = ms(config.signup.tokenExpiration);
 								user.signupTokenExpires = moment().add(timespan, 'ms').toDate();
 								
-								that.twilioClient.messages.create(
-									{
-										to: sms,
-										from: config.twilioNumber,
-										body: config.twilioMessage + ' ' + user.signupToken
-									},
-									function(err, message)
-									{
-										if (err)
+								if(process.env.NODE_ENV === 'production')
+								{
+									that.twilioClient.messages.create(
 										{
-											// The code was not sent via SMS
-											console.log('twilio error:', err, ', message:', message);
-											
-											// do not handle the route when REST is active
-											if(that.config.rest)
+											to: sms,
+											from: config.twilioNumber,
+											body: config.twilioMessage + ' ' + user.signupToken
+										},
+										function(err, message)
+										{
+											if (err)
 											{
-												next();
+												// The code was not sent via SMS
+												console.log('twilio error:', err, ', message:', message);
+												
+												// do not handle the route when REST is active
+												if(that.config.rest)
+												{
+													next();
+												}
+												else
+												{
+													// custom or built-in view
+													var view = that.config.signup.views.verify || join('resend-verification');
+
+													res.render(view,
+														{
+															title: 'Resend verification',
+															error: err.message,
+															basedir: req.app.get('views')
+														});
+												}
 											}
 											else
 											{
-												// custom or built-in view
-												var view = that.config.signup.views.verify || join('resend-verification');
-
-												res.render(view,
+												user.phoneNumber = sms;
+												user.phoneVerified = false;
+												// save updated user to db
+												adapter.update(user, function (err, user)
 													{
-														title: 'Resend verification',
-														error: err.message,
-														basedir: req.app.get('views')
-													});
-											}
-										}
-										else
-										{
-											user.phoneNumber = sms;
-											user.phoneVerified = false;
-											// save updated user to db
-											adapter.update(user, function (err, user)
-												{
-													if(err)
-													{
-														next(err);
-													}
-													else
-													{
-														console.log('twilio success');
-														
-														// emit event
-														that.emit('signup::post', user, command);
-
-														// send only JSON when REST is active
-														if(config.rest)
+														if(err)
 														{
-															res.send(204);
+															next(err);
 														}
 														else
 														{
-															var successView = config.signup.views.smsSent || join('post-signup');
-															res.locals.command = command;
-															res.render(successView,
-																{
-																	title: 'SMS code sent',
-																	basedir: req.app.get('views')
-																});
+															console.log('twilio success');
+															
+															// emit event
+															that.emit('signup::post', user, command);
+
+															// send only JSON when REST is active
+															if(config.rest)
+															{
+																res.send(204);
+															}
+															else
+															{
+																var successView = config.signup.views.smsSent || join('post-signup');
+																res.locals.command = command;
+																res.render(successView,
+																	{
+																		title: 'SMS code sent',
+																		basedir: req.app.get('views')
+																	});
+															}
 														}
-													}
-												});
-										}
-									});
+													});
+											}
+										});
+								}
+								else
+								{
+									debug('----------------------------------------');
+									debug(config.twilioMessage + ' ' + user.signupToken);
+									debug('----------------------------------------');
+									user.phoneNumber = sms;
+									user.phoneVerified = false;
+									// save updated user to db
+									adapter.update(user, function (err, user)
+										{
+											if(err)
+											{
+												next(err);
+											}
+											else
+											{
+												console.log('twilio success');
+												
+												// emit event
+												that.emit('signup::post', user, command);
+
+												// send only JSON when REST is active
+												if(config.rest)
+												{
+													res.send(204);
+												}
+												else
+												{
+													var successView = config.signup.views.smsSent || join('post-signup');
+													res.locals.command = command;
+													res.render(successView,
+														{
+															title: 'SMS code sent',
+															basedir: req.app.get('views')
+														});
+												}
+											}
+										});
+								}
 							}
 							else
 							{
@@ -598,74 +642,116 @@ Signup.prototype.postSignupResend = function (req, res, next)
 										// Using phone number for verification?
 										if(sms !== undefined && sms.length > 1 && that.twilioClient !== undefined)
 										{
-											that.twilioClient.messages.create(
-												{
-													to: sms,
-													from: config.twilioNumber,
-													body: config.twilioMessage + ' ' + user.signupToken
-												},
-												function(err, message)
-												{
-													if (err)
+											if(process.env.NODE_ENV === 'production')
+											{
+												that.twilioClient.messages.create(
 													{
-														// The code was not sent via SMS
-														console.log('twilio error:', err, ', message:', message);
-														
-														// do not handle the route when REST is active
-														if(that.config.rest)
+														to: sms,
+														from: config.twilioNumber,
+														body: config.twilioMessage + ' ' + user.signupToken
+													},
+													function(err, message)
+													{
+														if (err)
 														{
-															next();
+															// The code was not sent via SMS
+															console.log('twilio error:', err, ', message:', message);
+															
+															// do not handle the route when REST is active
+															if(that.config.rest)
+															{
+																next();
+															}
+															else
+															{
+																// custom or built-in view
+																var view = that.config.signup.views.resend || join('resend-verification');
+
+																res.render(view,
+																	{
+																		title: 'Resend verification',
+																		error: err.message,
+																		basedir: req.app.get('views')
+																	});
+															}
 														}
 														else
 														{
-															// custom or built-in view
-															var view = that.config.signup.views.resend || join('resend-verification');
-
-															res.render(view,
+															user.phoneNumber = sms;
+															user.phoneVerified = false;
+															// save updated user to db
+															adapter.update(user, function (err, user)
 																{
-																	title: 'Resend verification',
-																	error: err.message,
-																	basedir: req.app.get('views')
-																});
-														}
-													}
-													else
-													{
-														user.phoneNumber = sms;
-														user.phoneVerified = false;
-														// save updated user to db
-														adapter.update(user, function (err, user)
-															{
-																if(err)
-																{
-																	next(err);
-																}
-																else
-																{
-																	console.log('twilio success');
-																	
-																	// emit event
-																	that.emit('signup::post', user, command);
-
-																	// send only JSON when REST is active
-																	if(config.rest)
+																	if(err)
 																	{
-																		res.send(204);
+																		next(err);
 																	}
 																	else
 																	{
-																		var successView = config.signup.views.smsSent || join('post-signup');
-																		res.locals.command = command;
-																		res.render(successView,
-																			{
-																				title: 'SMS code sent',
-																				basedir: req.app.get('views')
-																			});
+																		console.log('twilio success');
+																		
+																		// emit event
+																		that.emit('signup::post', user, command);
+
+																		// send only JSON when REST is active
+																		if(config.rest)
+																		{
+																			res.send(204);
+																		}
+																		else
+																		{
+																			var successView = config.signup.views.smsSent || join('post-signup');
+																			res.locals.command = command;
+																			res.render(successView,
+																				{
+																					title: 'SMS code sent',
+																					basedir: req.app.get('views')
+																				});
+																		}
 																	}
-																}
-															});
-													}
-												});
+																});
+														}
+													});
+											}
+											else
+											{
+												debug('----------------------------------------');
+												debug(config.twilioMessage + ' ' + user.signupToken);
+												debug('----------------------------------------');
+												user.phoneNumber = sms;
+												user.phoneVerified = false;
+												// save updated user to db
+												adapter.update(user, function (err, user)
+													{
+														if(err)
+														{
+															next(err);
+														}
+														else
+														{
+															console.log('twilio success');
+															
+															// emit event
+															that.emit('signup::post', user, command);
+
+															// send only JSON when REST is active
+															if(config.rest)
+															{
+																res.send(204);
+															}
+															else
+															{
+																var successView = config.signup.views.smsSent || join('post-signup');
+																res.locals.command = command;
+																res.render(successView,
+																	{
+																		title: 'SMS code sent',
+																		basedir: req.app.get('views')
+																	});
+															}
+														}
+													});
+											}
 										}
 										else
 										{
