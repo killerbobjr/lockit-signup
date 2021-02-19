@@ -27,9 +27,8 @@
     "lockit-sendmail": "git://github.com/killerbobjr/lockit-sendmail.git",
     "moment": "^2.24.0",
     "ms": "^2.1.2",
-    "phone": "^2.3.17",
-    "shortid": "git://github.com/killerbobjr/shortid.git",
-    "twilio": "^3.33.1"
+    "phone": "^2.4.20",
+    "shortid": "git://github.com/killerbobjr/shortid.git"
   },
   "devDependencies": {
     "body-parser": "^1.19.0",

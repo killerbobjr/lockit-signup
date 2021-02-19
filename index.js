@@ -1,15 +1,14 @@
-var path = require('path');
-var events = require('events');
-var util = require('util');
-var express = require('express');
-var uuid = require('shortid');	// Shortid instead of uuid
-var ms = require('ms');
-var moment = require('moment');
-var Mail = require('lockit-sendmail');
-var async = require('async');
-var phone = require('phone');
-var twilio = require("twilio");
-var debug = require('debug')('lockit');
+var	path = require('path'),
+	events = require('events'),
+	util = require('util'),
+	express = require('express'),
+	uuid = require('shortid'),	// Shortid instead of uuid
+	ms = require('ms'),
+	moment = require('moment'),
+	Mail = require('lockit-sendmail'),
+	async = require('async'),
+	phone = require('phone'),
+	debug = require('debug')('lockit');
 
 /**
  * Internal helper functions
@@ -26,7 +25,7 @@ function join(view)
  * @param {Object} config
  * @param {Object} adapter
  */
-var Signup = module.exports = function (config, adapter)
+var Signup = module.exports = function (cfg, adapter)
 {
 	var that = this;
 	
@@ -36,30 +35,104 @@ var Signup = module.exports = function (config, adapter)
 	}
 	events.EventEmitter.call(this);
 
-	this.config = config;
+	this.config = cfg;
 	this.adapter = adapter;
+	
+	var	config = this.config;
 
-	var route = config.signup.route || '/signup';
-	if(config.rest)
+	// set default routes
+	this.route = config.signup.route || '/signup';
+	this.resendRoute = config.signup.resendRoute || '/resend';
+
+	// change URLs if REST is active
+	if (config.rest)
 	{
-		route = '/rest' + route;
+		this.route = '/' + config.rest.route + this.route;
+		this.resendRoute = '/' + config.rest.route + this.resendRoute;
 	}
 
 	var router = express.Router();
-	router.get(route, this.getSignup.bind(this));
-	router.post(route, this.postSignup.bind(this));
-	router.get(route + '/resend-verification', this.getSignupResend.bind(this));
-	router.post(route + '/resend-verification', this.postSignupResend.bind(this));
-	router.get(route + '/:token', this.getSignupToken.bind(this));
+	router.get(this.route, this.getSignup.bind(this));
+	router.post(this.route, this.postSignup.bind(this));
+	router.get(this.resendRoute, this.getSignupResend.bind(this));
+	router.post(this.resendRoute, this.postSignupResend.bind(this));
+	router.get(this.route + '/:token', this.getSignupToken.bind(this));
 	this.router = router;
 
-	if(config.twilioSid !== undefined)
-	{
-		this.twilioClient = twilio(config.twilioSid, config.twilioToken);
-	}
 };
 
 util.inherits(Signup, events.EventEmitter);
+
+
+
+/**
+ * Response handler
+ *
+ * @param {Object} err
+ * @param {String} view
+ * @param {Object} user
+ * @param {Object} req
+ * @param {Object} res
+ * @param {Function} next
+ */
+Signup.prototype.sendResponse = function(err, view, user, json, redirect, req, res, next)
+{
+	var	config = this.config;
+
+	this.emit((config.signup.eventMessage || 'Signup'), err, view, user, res);
+	
+	if(config.signup.handleResponse)
+	{
+		// do not handle the route when REST is active
+		if(config.rest)
+		{
+			if(err)
+			{
+				res.status(403).json(err);
+			}
+			else
+			{
+				res.json(json);
+			}
+		}
+		else
+		{
+			// custom or built-in view
+			var	resp = {
+					title: config.signup.title || 'Signup',
+					basedir: req.app.get('views')
+				};
+				
+			if(err)
+			{
+				resp.error = err.message;
+			}
+			else if(req.query && req.query.error)
+			{
+				resp.error = decodeURIComponent(req.query.error);
+			}
+			
+			if(view)
+			{
+				var	file = path.resolve(path.normalize(resp.basedir + '/' + view));
+				res.render(view, Object.assign(resp, json));
+			}
+			else if(redirect)
+			{
+				res.redirect(redirect);
+			}
+			else
+			{
+				res.status(404).send('<p>No file has been set for this view path in the Lockit.signup configuration.</p><p>Please make sure you set a valid file path for "login.views.signup".</p>');
+			}
+		}
+	}
+	else
+	{
+		next(err);
+	}
+};
+
 
 /**
  * GET /signup.
@@ -70,22 +143,11 @@ util.inherits(Signup, events.EventEmitter);
  */
 Signup.prototype.getSignup = function (req, res, next)
 {
-	// do not handle the route when REST is active
-	if(this.config.rest)
-	{
-		next();
-	}
-	else
-	{
-		// custom or built-in view
-		var view = this.config.signup.views.signup || join('get-signup');
-
-		res.render(view,
-			{
-				title: 'Sign up',
-				basedir: req.app.get('views')
-			});
-	}
+	var	config = this.config,
+		// save redirect url
+		suffix = req.query.redirect ? '?redirect=' + encodeURIComponent(req.query.redirect) : '';
+	
+	this.sendResponse(undefined, config.signup.views.signup, undefined, {action:this.route + suffix, result:true}, undefined, req, res, next);
 };
 
 /**
@@ -97,17 +159,25 @@ Signup.prototype.getSignup = function (req, res, next)
  */
 Signup.prototype.postSignup = function (req, res, next)
 {
-	var config = this.config;
-	var adapter = this.adapter;
-	var that = this;
-
-	var name = req.body.name;
-	var email = req.body.email;
-	var password = req.body.password;
-
-	var error = null;
-	var forgot = false;
-	var useLogin = false;
+	var	config = this.config,
+		adapter = this.adapter,
+		that = this,
+		name = req.body.name,
+		email = req.body.email,
+		password = req.body.password,
+		error,
+		forgot = false,
+		useLogin = false,
+		NAME_REGEXP = /^[\x20A-Za-z0-9._%+-@]{3,50}$/,
+		checkEmail = function(e)
+		{
+			var emailRegex = /^(([^<>()[\]\.,;:\s@\"]+(\.[^<>()[\]\.,;:\s@\"]+)*)|(\".+\"))@(([^<>()[\]\.,;:\s@\"]+\.)+[^<>()[\]\.,;:\s@\"]{2,})$/i;
+			if(emailRegex.exec(e) && emailRegex.exec(e)[0] === e)
+			{
+				return true;
+			}
+			return false;
+		};
 
 	// Custom for our app
 	var	basequery = {};
@@ -116,9 +186,6 @@ Signup.prototype.postSignup = function (req, res, next)
 		basequery = res.locals.basequery;
 	}
 
-	// regexp from https://github.com/angular/angular.js/blob/master/src/ng/directive/input.js#L4
-	var EMAIL_REGEXP = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,6}$/;
-	var NAME_REGEXP = /^[\x20A-Za-z0-9._%+-@]{3,50}$/;
 
 	// check for valid inputs
 	if(!password)
@@ -145,29 +212,9 @@ Signup.prototype.postSignup = function (req, res, next)
 		error = 'You have entered an invalid email address!';
 	}
 	
-	// custom or built-in view
-	var errorView = config.signup.views.signup || join('get-signup');
-
 	if(error)
 	{
-		// send only JSON when REST is active
-		if(config.rest)
-		{
-			res.json(403, { error: error });
-		}
-		else
-		{
-			// render template with error message
-			res.status(403);
-			res.render(errorView,
-				{
-					title: 'Sign up',
-					error: error,
-					basedir: req.app.get('views'),
-					name: name,
-					email: email
-				});
-		}
+		this.sendResponse({message:error}, config.signup.views.signup, undefined, {result:true}, undefined, req, res, next);
 	}
 	else
 	{
@@ -233,30 +280,12 @@ Signup.prototype.postSignup = function (req, res, next)
 				{
 					if(useLogin)
 					{
-						config.rerouted = true;
+						config.signup.rerouted = true;
 						res.redirect(307, config.login.route);
 					}
 					else
 					{
-						if(config.rest)
-						{
-							res.json(403, { error: error });
-						}
-						else
-						{
-							// render template with error message
-							res.status(403);
-							res.render(errorView,
-								{
-									title: 'Sign up',
-									error: error,
-									basedir: req.app.get('views'),
-									name: name,
-									email: email,
-									login: email,
-									forgot: forgot
-								});
-						}
+						that.sendResponse({message:error}, config.signup.views.signup, undefined, {result:true}, undefined, req, res, next);
 					}
 				}
 				else
@@ -270,27 +299,30 @@ Signup.prototype.postSignup = function (req, res, next)
 							}
 							else
 							{
-								that.emit('signedup', user, res, req);
-
-								if(config.signup.handleResponse)
+								if(config.signup.completionRoute)
 								{
-									// send only JSON when REST is active
-									if(config.rest)
+									if(typeof config.signup.completionRoute === 'function')
 									{
-										res.send(204);
+										config.signup.completionRoute(user, req, res, function(err, req, res)
+											{
+												if(err)
+												{
+													next(err);
+												}
+												else
+												{
+													that.sendResponse(undefined, req.query.redirect?undefined:config.signup.views.signedup, user, {result:true}, req.query.redirect, req, res, next);
+												}
+											});
 									}
 									else
 									{
-										// custom or built-in view
-										var view = config.signup.views.signedup || join('mail-verification-success');
-
-										// render email verification success view
-										res.render(view,
-											{
-												title: 'Sign up success',
-												basedir: req.app.get('views')
-											});
+										that.sendResponse(undefined, undefined, user, {result:true}, config.signup.completionRoute, req, res, next);
 									}
+								}
+								else
+								{
+									that.sendResponse(undefined, config.signup.views.signedup, user, {result:true}, undefined, req, res, next);
 								}
 							}
 						});
@@ -308,22 +340,11 @@ Signup.prototype.postSignup = function (req, res, next)
  */
 Signup.prototype.getSignupResend = function (req, res, next)
 {
-	// do not handle the route when REST is active
-	if(this.config.rest)
-	{
-		next();
-	}
-	else
-	{
-		// custom or built-in view
-		var view = this.config.signup.views.resend || join('resend-verification');
-
-		res.render(view,
-			{
-				title: 'Resend verification email',
-				basedir: req.app.get('views')
-			});
-	}
+	var	config = this.config,
+		// save redirect url
+		suffix = req.query.redirect ? '?redirect=' + encodeURIComponent(req.query.redirect) : '';
+	
+	this.sendResponse(undefined, config.signup.views.resend, undefined, {action:this.resendRoute + suffix, result:true}, undefined, req, res, next);
 };
 
 /**
@@ -342,7 +363,9 @@ Signup.prototype.postSignupResend = function (req, res, next)
 		name = req.body.name,
 		sms = req.body.phone,
 		command = req.body.command,	// command to return after success
-		error = '',
+		error,
+		token,
+		timespan,
 		// regexp from https://github.com/angular/angular.js/blob/master/src/ng/directive/input.js#L4
 		EMAIL_REGEXP = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,6}$/;
 
@@ -362,28 +385,9 @@ Signup.prototype.postSignupResend = function (req, res, next)
 		}
 	}
 
-	if(error.length > 0)
+	if(error)
 	{
-		// send only JSON when REST is active
-		if(config.rest)
-		{
-			res.json(403, { error: error });
-		}
-		else
-		{
-			// custom or built-in view
-			var errorView = config.signup.views.resend || join('resend-verification');
-
-			// render template with error message
-			res.status(403);
-			res.locals.command = command;
-			res.render(errorView,
-				{
-					title: 'Resend verification email',
-					error: error,
-					basedir: req.app.get('views')
-				});
-		}
+		that.sendResponse({message:error}, config.signup.views.resend, undefined, {result:true}, undefined, req, res, next);
 	}
 	else
 	{
@@ -404,47 +408,14 @@ Signup.prototype.postSignupResend = function (req, res, next)
 				else if(user === undefined || user === null)
 				{
 					// User email not found. Signup redirect.
-					
-					// send only JSON when REST is active
-					if(config.rest)
-					{
-						res.send(204);
-					}
-					else
-					{
-						var route = config.signup.route || '/signup';
-
-						// render signup view
-						res.redirect(route);
-					}
+					that.sendResponse(undefined, undefined, undefined, {result:true}, config.signup.route, req, res, next);
 				}
 				else if(user)
 				{
 					// Locked or deleted user account?
 					if(user.accountInvalid || user.accountLocked)
 					{
-						error = 'That email is invalid';
-						
-						// send only JSON when REST is active
-						if(config.rest)
-						{
-							res.json(403, {error: error});
-						}
-						else
-						{
-							var errorView = config.signup.views.resend || join('resend-verification');
-
-							// render template with error message
-							res.status(403);
-
-							res.render(errorView,
-								{
-									title: 'Invalid account',
-									error: error,
-									basedir: req.app.get('views'),
-									email: email
-								});
-						}
+						that.sendResponse({message:'That email is invalid'}, config.signup.views.resend, undefined, {result:true}, undefined, req, res, next);
 					}
 					else
 					{
@@ -452,50 +423,26 @@ Signup.prototype.postSignupResend = function (req, res, next)
 						if(user.emailVerified)
 						{
 							// Check if we're verifying the phone number
-							if(sms !== undefined && sms.length > 1 && that.twilioClient !== undefined)
+							if(sms !== undefined && sms.length > 1 && config.sms.client !== undefined)
 							{
 								// create new signup token
-								var token = uuid.generate();
+								token = uuid.generate();
 
 								// save token on user object
 								user.signupToken = token;
 
 								// set new sign up token expiration date
-								var timespan = ms(config.signup.tokenExpiration);
+								timespan = ms(config.signup.tokenExpiration);
 								user.signupTokenExpires = moment().add(timespan, 'ms').toDate();
 								
 								if(process.env.NODE_ENV === 'production')
 								{
-									that.twilioClient.messages.create(
-										{
-											to: sms,
-											from: config.twilioNumber,
-											body: config.twilioMessage + ' ' + user.signupToken
-										},
-										function(err, message)
+									config.sms.client(sms, config.sms.message + ' ' + user.signupToken, 	function(err, message)
 										{
 											if (err)
 											{
 												// The code was not sent via SMS
-												console.log('twilio error:', err, ', message:', message);
-												
-												// do not handle the route when REST is active
-												if(that.config.rest)
-												{
-													next();
-												}
-												else
-												{
-													// custom or built-in view
-													var view = that.config.signup.views.verify || join('resend-verification');
-
-													res.render(view,
-														{
-															title: 'Resend verification',
-															error: err.message,
-															basedir: req.app.get('views')
-														});
-												}
+												that.sendResponse(err, config.signup.views.verify, undefined, {result:true}, undefined, req, res, next);
 											}
 											else
 											{
@@ -510,26 +457,7 @@ Signup.prototype.postSignupResend = function (req, res, next)
 														}
 														else
 														{
-															console.log('twilio success');
-															
-															// emit event
-															that.emit('signup::post', user, command);
-
-															// send only JSON when REST is active
-															if(config.rest)
-															{
-																res.send(204);
-															}
-															else
-															{
-																var successView = config.signup.views.smsSent || join('post-signup');
-																res.locals.command = command;
-																res.render(successView,
-																	{
-																		title: 'SMS code sent',
-																		basedir: req.app.get('views')
-																	});
-															}
+															that.sendResponse(undefined, config.signup.views.smsSent, undefined, {result:true}, undefined, req, res, next);
 														}
 													});
 											}
@@ -538,7 +466,7 @@ Signup.prototype.postSignupResend = function (req, res, next)
 								else
 								{
 									debug('----------------------------------------');
-									debug(config.twilioMessage + ' ' + user.signupToken);
+									debug(config.sms.message + ' ' + user.signupToken);
 									debug('----------------------------------------');
 									user.phoneNumber = sms;
 									user.phoneVerified = false;
@@ -551,26 +479,7 @@ Signup.prototype.postSignupResend = function (req, res, next)
 											}
 											else
 											{
-												console.log('twilio success');
-												
-												// emit event
-												that.emit('signup::post', user, command);
-
-												// send only JSON when REST is active
-												if(config.rest)
-												{
-													res.send(204);
-												}
-												else
-												{
-													var successView = config.signup.views.smsSent || join('post-signup');
-													res.locals.command = command;
-													res.render(successView,
-														{
-															title: 'SMS code sent',
-															basedir: req.app.get('views')
-														});
-												}
+												that.sendResponse(undefined, config.signup.views.smsSent, undefined, {result:true}, undefined, req, res, next);
 											}
 										});
 								}
@@ -592,22 +501,30 @@ Signup.prototype.postSignupResend = function (req, res, next)
 										}
 										else
 										{
-											// send only JSON when REST is active
-											if(config.rest)
+											if(config.signup.completionResendRoute)
 											{
-												res.send(204);
+												if(typeof config.signup.completionResendRoute === 'function')
+												{
+													config.signup.completionResendRoute(user, req, res, function(err, req, res)
+														{
+															if(err)
+															{
+																next(err);
+															}
+															else
+															{
+																that.sendResponse(undefined, req.query.redirect?undefined:config.signup.views.verified, user, {result:true}, req.query.redirect, req, res, next);
+															}
+														});
+												}
+												else
+												{
+													that.sendResponse(undefined, undefined, user, {result:true}, config.signup.completionResendRoute, req, res, next);
+												}
 											}
 											else
 											{
-												// custom or built-in view
-												var view = config.signup.views.verified || join('mail-verification-success');
-
-												// render email verification success view
-												return res.render(view,
-													{
-														title: 'Sign up success',
-														basedir: req.app.get('views')
-													});
+												that.sendResponse(undefined, config.signup.views.verified, user, {result:true}, undefined, req, res, next);
 											}
 										}
 									});
@@ -618,13 +535,13 @@ Signup.prototype.postSignupResend = function (req, res, next)
 							// First time verification
 
 							// create new signup token
-							var token = uuid.generate();
+							token = uuid.generate();
 
 							// save token on user object
 							user.signupToken = token;
 
 							// set new sign up token expiration date
-							var timespan = ms(config.signup.tokenExpiration);
+							timespan = ms(config.signup.tokenExpiration);
 							user.signupTokenExpires = moment().add(timespan, 'ms').toDate();
 							
 							// If we're doing an email verification, save that temporarily
@@ -640,40 +557,16 @@ Signup.prototype.postSignupResend = function (req, res, next)
 									else
 									{
 										// Using phone number for verification?
-										if(sms !== undefined && sms.length > 1 && that.twilioClient !== undefined)
+										if(sms !== undefined && sms.length > 1 && config.sms.client !== undefined)
 										{
 											if(process.env.NODE_ENV === 'production')
 											{
-												that.twilioClient.messages.create(
-													{
-														to: sms,
-														from: config.twilioNumber,
-														body: config.twilioMessage + ' ' + user.signupToken
-													},
-													function(err, message)
+												config.sms.client(sms, config.sms.message + ' ' + user.signupToken, 	function(err, message)
 													{
 														if (err)
 														{
 															// The code was not sent via SMS
-															console.log('twilio error:', err, ', message:', message);
-															
-															// do not handle the route when REST is active
-															if(that.config.rest)
-															{
-																next();
-															}
-															else
-															{
-																// custom or built-in view
-																var view = that.config.signup.views.resend || join('resend-verification');
-
-																res.render(view,
-																	{
-																		title: 'Resend verification',
-																		error: err.message,
-																		basedir: req.app.get('views')
-																	});
-															}
+															that.sendResponse(err, config.signup.views.verify, undefined, {result:true}, undefined, req, res, next);
 														}
 														else
 														{
@@ -688,26 +581,7 @@ Signup.prototype.postSignupResend = function (req, res, next)
 																	}
 																	else
 																	{
-																		console.log('twilio success');
-																		
-																		// emit event
-																		that.emit('signup::post', user, command);
-
-																		// send only JSON when REST is active
-																		if(config.rest)
-																		{
-																			res.send(204);
-																		}
-																		else
-																		{
-																			var successView = config.signup.views.smsSent || join('post-signup');
-																			res.locals.command = command;
-																			res.render(successView,
-																				{
-																					title: 'SMS code sent',
-																					basedir: req.app.get('views')
-																				});
-																		}
+																		that.sendResponse(undefined, config.signup.views.smsSent, undefined, {result:true}, undefined, req, res, next);
 																	}
 																});
 														}
@@ -716,7 +590,7 @@ Signup.prototype.postSignupResend = function (req, res, next)
 											else
 											{
 												debug('----------------------------------------');
-												debug(config.twilioMessage + ' ' + user.signupToken);
+												debug(config.sms.message + ' ' + user.signupToken);
 												debug('----------------------------------------');
 												user.phoneNumber = sms;
 												user.phoneVerified = false;
@@ -729,26 +603,7 @@ Signup.prototype.postSignupResend = function (req, res, next)
 														}
 														else
 														{
-															console.log('twilio success');
-															
-															// emit event
-															that.emit('signup::post', user, command);
-
-															// send only JSON when REST is active
-															if(config.rest)
-															{
-																res.send(204);
-															}
-															else
-															{
-																var successView = config.signup.views.smsSent || join('post-signup');
-																res.locals.command = command;
-																res.render(successView,
-																	{
-																		title: 'SMS code sent',
-																		basedir: req.app.get('views')
-																	});
-															}
+															that.sendResponse(undefined, config.signup.views.smsSent, undefined, {result:true}, undefined, req, res, next);
 														}
 													});
 											}
@@ -758,36 +613,17 @@ Signup.prototype.postSignupResend = function (req, res, next)
 											// Using email for verification
 											
 											// send sign up email
-											var	cfg = JSON.parse(JSON.stringify(config)),
-												use = JSON.parse(JSON.stringify(user)),
-												mail = new Mail(cfg);
+											var	mail = new Mail(config);
 											
-											mail.signup(use.name, use.email, use.signupToken, function (err, result)
+											mail.signup(user.name, user.email, user.signupToken, function (err, result)
 												{
 													if(err)
 													{
-														next(err);
+														that.sendResponse(err, config.signup.views.route, user, {result:true}, req, res, next);
 													}
 													else
 													{
-														// emit event
-														that.emit('signup::post', use, command);
-
-														// send only JSON when REST is active
-														if(config.rest)
-														{
-															res.send(204);
-														}
-														else
-														{
-															var successView = config.signup.views.signedUp || join('post-signup');
-															res.locals.command = command;
-															res.render(successView,
-																{
-																	title: 'Email sent',
-																	basedir: req.app.get('views')
-																});
-														}
+														that.sendResponse(undefined, config.signup.views.signedUp, undefined, {result:true}, undefined, req, res, next);
 													}
 												});
 										}
@@ -816,7 +652,8 @@ Signup.prototype.getSignupToken = function (req, res, next)
 		adapter = this.adapter,
 		that = this,
 		command = req.query.command,
-		token = req.params.token;
+		token = req.params.token,
+		view;
 
 	// Reset alphabet
 	uuid.generate();
@@ -828,16 +665,7 @@ Signup.prototype.getSignupToken = function (req, res, next)
 			// if format is wrong no need to query the database
 			if(!uuid.isValid(token))
 			{
-				// custom or built-in view
-				var expiredView = config.signup.views.linkExpired || join('link-expired');
-
-				// render template to allow resending verification email
-				res.render(expiredView,
-					{
-						title: 'Authorization invalid',
-						error: 'Authorization code was not valid or has expired',
-						basedir: req.app.get('views')
-					});
+				that.sendResponse(undefined, config.signup.views.linkExpired, undefined, {result:true}, undefined, req, res, next);
 			}
 			else
 			{
@@ -861,16 +689,7 @@ Signup.prototype.getSignupToken = function (req, res, next)
 							// no user found -> forward to error handling middleware
 							if(!user)
 							{
-								// custom or built-in view
-								var expiredView = config.signup.views.linkExpired || join('link-expired');
-
-								// render template to allow resending verification email
-								res.render(expiredView,
-									{
-										title: 'Authorization invalid',
-										error: 'Authorization code was not valid or has expired',
-										basedir: req.app.get('views')
-									});
+								that.sendResponse(undefined, config.signup.views.linkExpired, undefined, {result:true}, undefined, req, res, next);
 							}
 							// check if token has expired
 							else if(new Date(user.signupTokenExpires) < new Date())
@@ -887,25 +706,8 @@ Signup.prototype.getSignupToken = function (req, res, next)
 										}
 										else
 										{
-											// send only JSON when REST is active
-											if(config.rest)
-											{
-												res.json(403, { error: 'token expired' });
-											}
-											else
-											{
-												// custom or built-in view
-												var expiredView = config.signup.views.linkExpired || join('link-expired');
-
-												// render template to allow resending verification email
-												res.render(expiredView,
-													{
-														title: 'Authorization code has expired',
-														basedir: req.app.get('views')
-													});
-											}
+											that.sendResponse(undefined, config.signup.views.linkExpired, undefined, {result:true}, undefined, req, res, next);
 										}
-
 									});
 							}
 							else
@@ -940,34 +742,30 @@ Signup.prototype.getSignupToken = function (req, res, next)
 										}
 										else
 										{
-											// emit 'signup' event
-											//console.log('emit signup event:', req);
-											
-											that.emit('verified', user, res, req);
-
-											if(config.signup.handleResponse)
+											if(config.signup.completionResendRoute)
 											{
-												// send only JSON when REST is active
-												if(config.rest)
+												if(typeof config.signup.completionResendRoute === 'function')
 												{
-													res.send(204);
+													config.signup.completionResendRoute(user, req, res, function(err, req, res)
+														{
+															if(err)
+															{
+																next(err);
+															}
+															else
+															{
+																that.sendResponse(undefined, req.query.redirect?undefined:config.signup.views.verified, user, {result:true}, req.query.redirect, req, res, next);
+															}
+														});
 												}
 												else
 												{
-													// custom or built-in view
-													var view = config.signup.views.verified || join('mail-verification-success');
-
-													if(command)
-													{
-														res.locals.command = command;
-													}
-													// render email verification success view
-													res.render(view,
-														{
-															title: 'Verification success',
-															basedir: req.app.get('views')
-														});
+													that.sendResponse(undefined, undefined, user, {result:true}, config.signup.completionResendRoute, req, res, next);
 												}
+											}
+											else
+											{
+												that.sendResponse(undefined, config.signup.views.verified, user, {result:true}, undefined, req, res, next);
 											}
 										}
 									});
@@ -978,25 +776,11 @@ Signup.prototype.getSignupToken = function (req, res, next)
 		}
 		else
 		{
-			var view = that.config.signup.views.resend || join('resend-verification');
-			// render template to allow resending verification email
-			res.render(view,
-				{
-					title: 'Authorization invalid',
-					error: 'Authorization code was not valid or has expired',
-					basedir: req.app.get('views')
-				});
+			that.sendResponse(undefined, config.signup.views.linkExpired, undefined, {result:true}, undefined, req, res, next);
 		}
 	}
 	else
 	{
-		var view = that.config.signup.views.resend || join('resend-verification');
-		// render template to allow resending verification email
-		res.render(view,
-			{
-				title: 'Authorization invalid',
-				error: 'Authorization code was not valid or has expired',
-				basedir: req.app.get('views')
-			});
+		that.sendResponse(undefined, config.signup.views.linkExpired, undefined, {result:true}, undefined, req, res, next);
 	}
 };
