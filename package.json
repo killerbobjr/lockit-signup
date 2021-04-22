@@ -1,7 +1,7 @@
 {
   "name": "lockit-signup",
   "version": "1.2.0",
-  "description": "signup module for lockit",
+  "description": "signup module for lockit, legacy version",
   "main": "index.js",
   "scripts": {
     "test": "grunt"
@@ -24,7 +24,7 @@
   "dependencies": {
     "async": "^3.1.0",
     "debug": "^4.1.1",
-    "lockit-sendmail": "git://github.com/killerbobjr/lockit-sendmail.git",
+    "lockit-sendmail": "git://github.com/killerbobjr/lockit-sendmail.git#legacy",
     "moment": "^2.24.0",
     "ms": "^2.1.2",
     "phone": "^2.3.17",
@@ -44,9 +44,9 @@
     "grunt-contrib-jshint": "^2.1.0",
     "grunt-mocha-test": "^0.13.3",
     "pug": "^2.0.4",
-    "lockit-couchdb-adapter": "git://github.com/killerbobjr/lockit-couchdb-adapter.git",
-    "lockit-template-blank": "git://github.com/killerbobjr/lockit-template-blank.git",
-    "lockit-utils": "git://github.com/killerbobjr/lockit-utilities.git",
+    "lockit-couchdb-adapter": "git://github.com/killerbobjr/lockit-couchdb-adapter.git#legacy",
+    "lockit-template-blank": "git://github.com/killerbobjr/lockit-template-blank.git#legacy",
+    "lockit-utils": "git://github.com/killerbobjr/lockit-utilities.git#legacy",
     "mocha": "^6.2.0",
     "nano": "^8.1.0",
     "nodemailer-stub-transport": "^1.1.0",
