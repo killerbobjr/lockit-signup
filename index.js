@@ -84,14 +84,24 @@ Signup.prototype.sendResponse = function(err, view, user, json, redirect, req, r
 	if(config.signup.handleResponse)
 	{
 		// do not handle the route when REST is active
-		if(config.rest)
+		if(config.rest || req.query.rest)
 		{
 			if(err)
 			{
-				res.status(403).json(err);
+				// Duplicate to make it easy for REST
+				// response handlers to detect
+				if(!err.error)
+				{
+					err.error = err.message;
+				}
+				res.json(err);
 			}
 			else
 			{
+				if(redirect)
+				{
+					json.redirect = redirect;
+				}
 				res.json(json);
 			}
 		}
@@ -147,7 +157,7 @@ Signup.prototype.getSignup = function (req, res, next)
 		// save redirect url
 		suffix = req.query.redirect ? '?redirect=' + encodeURIComponent(req.query.redirect) : '';
 	
-	this.sendResponse(undefined, config.signup.views.signup, undefined, {action:this.route + suffix, result:true}, undefined, req, res, next);
+	this.sendResponse(undefined, config.signup.views.signup, undefined, {action:this.route + suffix, view:'signup'}, undefined, req, res, next);
 };
 
 /**
@@ -166,8 +176,6 @@ Signup.prototype.postSignup = function (req, res, next)
 		email = req.body.email,
 		password = req.body.password,
 		error,
-		forgot = false,
-		useLogin = false,
 		NAME_REGEXP = /^[\x20A-Za-z0-9._%+-@]{3,50}$/,
 		checkEmail = function(e)
 		{
@@ -214,7 +222,7 @@ Signup.prototype.postSignup = function (req, res, next)
 	
 	if(error)
 	{
-		this.sendResponse({message:error}, config.signup.views.signup, undefined, {result:true}, undefined, req, res, next);
+		this.sendResponse({message:error}, config.signup.views.signup, undefined, {view:'signup'}, undefined, req, res, next);
 	}
 	else
 	{
@@ -247,20 +255,18 @@ Signup.prototype.postSignup = function (req, res, next)
 					{
 						if(user.accountInvalid)
 						{
-							error = 'The ' + check.value + ' "' + user.email + '" has been deactivated';
+							error = 'The ' + check.value + ' <b>' + user.name + '</b> cannot be used';
 						}
 						else
 						{
 							if(check.value === 'email')
 							{
-								error = 'The email account "' + user.email + '" is already signed up.';
+								error = 'The email <b>' + user.email + '</b> is already signed up.';
 							}
 							else
 							{
-								error = 'The user "' + user.name + '" is already signed up.';
+								error = 'The user <b>' + user.name + '</b> is already signed up.';
 							}
-							useLogin = config.signup.useLogin;
-							forgot = true;
 						}
 						return nextasync();
 					}
@@ -278,54 +284,68 @@ Signup.prototype.postSignup = function (req, res, next)
 				}
 				else if(typeof error === 'string')
 				{
-					if(useLogin)
-					{
-						config.signup.rerouted = true;
-						res.redirect(307, config.login.route);
-					}
-					else
-					{
-						that.sendResponse({message:error}, config.signup.views.signup, undefined, {result:true}, undefined, req, res, next);
-					}
+					that.sendResponse({message:error}, config.signup.views.signup, undefined, {view:'signup'}, undefined, req, res, next);
 				}
 				else
 				{
-					// save new user to db
-					adapter.save(name, email, password, function (err, user)
+					var	saveUser = function(req, res)
 						{
-							if(err)
-							{
-								next(err);
-							}
-							else
-							{
-								if(config.signup.completionRoute)
+							// save new user to db
+							adapter.save(name, email, password, function (err, user)
 								{
-									if(typeof config.signup.completionRoute === 'function')
+									if(err)
 									{
-										config.signup.completionRoute(user, req, res, function(err, req, res)
-											{
-												if(err)
-												{
-													next(err);
-												}
-												else
-												{
-													that.sendResponse(undefined, req.query.redirect?undefined:config.signup.views.signedup, user, {result:true}, req.query.redirect, req, res, next);
-												}
-											});
+										next(err);
 									}
 									else
 									{
-										that.sendResponse(undefined, undefined, user, {result:true}, config.signup.completionRoute, req, res, next);
+										if(config.signup.completionRoute)
+										{
+											if(typeof config.signup.completionRoute === 'function')
+											{
+												config.signup.completionRoute(user, req, res, function(err, req, res)
+													{
+														if(err)
+														{
+															next(err);
+														}
+														else
+														{
+															that.sendResponse(undefined, req.query.redirect?undefined:config.signup.views.signedUp, user, {view:'signedUp'}, req.query.redirect, req, res, next);
+														}
+													});
+											}
+											else
+											{
+												that.sendResponse(undefined, undefined, user, {view:'signedUp'}, config.signup.completionRoute, req, res, next);
+											}
+										}
+										else
+										{
+											that.sendResponse(undefined, config.signup.views.signedUp, user, {view:'signedUp'}, undefined, req, res, next);
+										}
 									}
+								});
+						};
+
+					if(config.signup.validation && typeof config.signup.validation === 'function')
+					{
+						config.signup.validation(req, res, function(err, req, res)
+							{
+								if(err)
+								{
+									that.sendResponse(err, config.signup.views.signup, undefined, {view:'signup'}, undefined, req, res, next);
 								}
 								else
 								{
-									that.sendResponse(undefined, config.signup.views.signedup, user, {result:true}, undefined, req, res, next);
+									saveUser(req, res);
 								}
-							}
-						});
+							});
+					}
+					else
+					{
+						saveUser(req, res);
+					}
 				}
 			});
 	}
@@ -344,7 +364,7 @@ Signup.prototype.getSignupResend = function (req, res, next)
 		// save redirect url
 		suffix = req.query.redirect ? '?redirect=' + encodeURIComponent(req.query.redirect) : '';
 	
-	this.sendResponse(undefined, config.signup.views.resend, undefined, {action:this.resendRoute + suffix, result:true}, undefined, req, res, next);
+	this.sendResponse(undefined, config.signup.views.resend, undefined, {action:this.resendRoute + suffix, view:'resend'}, undefined, req, res, next);
 };
 
 /**
@@ -387,7 +407,7 @@ Signup.prototype.postSignupResend = function (req, res, next)
 
 	if(error)
 	{
-		that.sendResponse({message:error}, config.signup.views.resend, undefined, {result:true}, undefined, req, res, next);
+		that.sendResponse({message:error}, config.signup.views.resend, undefined, {view:'resend'}, undefined, req, res, next);
 	}
 	else
 	{
@@ -408,14 +428,14 @@ Signup.prototype.postSignupResend = function (req, res, next)
 				else if(user === undefined || user === null)
 				{
 					// User email not found. Signup redirect.
-					that.sendResponse(undefined, undefined, undefined, {result:true}, config.signup.route, req, res, next);
+					that.sendResponse(undefined, undefined, undefined, {view:'signup'}, config.signup.route, req, res, next);
 				}
 				else if(user)
 				{
 					// Locked or deleted user account?
 					if(user.accountInvalid || user.accountLocked)
 					{
-						that.sendResponse({message:'That email is invalid'}, config.signup.views.resend, undefined, {result:true}, undefined, req, res, next);
+						that.sendResponse({message:'That email is invalid'}, config.signup.views.resend, undefined, {view:'resend'}, undefined, req, res, next);
 					}
 					else
 					{
@@ -442,7 +462,7 @@ Signup.prototype.postSignupResend = function (req, res, next)
 											if (err)
 											{
 												// The code was not sent via SMS
-												that.sendResponse(err, config.signup.views.verify, undefined, {result:true}, undefined, req, res, next);
+												that.sendResponse(err, config.signup.views.verify, undefined, {view:'verify'}, undefined, req, res, next);
 											}
 											else
 											{
@@ -457,7 +477,7 @@ Signup.prototype.postSignupResend = function (req, res, next)
 														}
 														else
 														{
-															that.sendResponse(undefined, config.signup.views.smsSent, undefined, {result:true}, undefined, req, res, next);
+															that.sendResponse(undefined, config.signup.views.smsSent, undefined, {view:'smsSent'}, undefined, req, res, next);
 														}
 													});
 											}
@@ -479,7 +499,7 @@ Signup.prototype.postSignupResend = function (req, res, next)
 											}
 											else
 											{
-												that.sendResponse(undefined, config.signup.views.smsSent, undefined, {result:true}, undefined, req, res, next);
+												that.sendResponse(undefined, config.signup.views.smsSent, undefined, {view:'smsSent'}, undefined, req, res, next);
 											}
 										});
 								}
@@ -513,18 +533,18 @@ Signup.prototype.postSignupResend = function (req, res, next)
 															}
 															else
 															{
-																that.sendResponse(undefined, req.query.redirect?undefined:config.signup.views.verified, user, {result:true}, req.query.redirect, req, res, next);
+																that.sendResponse(undefined, req.query.redirect?undefined:config.signup.views.verified, user, {view:'verified'}, req.query.redirect, req, res, next);
 															}
 														});
 												}
 												else
 												{
-													that.sendResponse(undefined, undefined, user, {result:true}, config.signup.completionResendRoute, req, res, next);
+													that.sendResponse(undefined, undefined, user, {view:'verified'}, config.signup.completionResendRoute, req, res, next);
 												}
 											}
 											else
 											{
-												that.sendResponse(undefined, config.signup.views.verified, user, {result:true}, undefined, req, res, next);
+												that.sendResponse(undefined, config.signup.views.verified, user, {view:'verified'}, config.signup.completionRoute, req, res, next);
 											}
 										}
 									});
@@ -566,7 +586,7 @@ Signup.prototype.postSignupResend = function (req, res, next)
 														if (err)
 														{
 															// The code was not sent via SMS
-															that.sendResponse(err, config.signup.views.verify, undefined, {result:true}, undefined, req, res, next);
+															that.sendResponse(err, config.signup.views.verify, undefined, {view:'verify'}, undefined, req, res, next);
 														}
 														else
 														{
@@ -581,7 +601,7 @@ Signup.prototype.postSignupResend = function (req, res, next)
 																	}
 																	else
 																	{
-																		that.sendResponse(undefined, config.signup.views.smsSent, undefined, {result:true}, undefined, req, res, next);
+																		that.sendResponse(undefined, config.signup.views.smsSent, undefined, {view:'smsSent'}, undefined, req, res, next);
 																	}
 																});
 														}
@@ -603,7 +623,7 @@ Signup.prototype.postSignupResend = function (req, res, next)
 														}
 														else
 														{
-															that.sendResponse(undefined, config.signup.views.smsSent, undefined, {result:true}, undefined, req, res, next);
+															that.sendResponse(undefined, config.signup.views.smsSent, undefined, {view:'smsSent'}, undefined, req, res, next);
 														}
 													});
 											}
@@ -619,11 +639,11 @@ Signup.prototype.postSignupResend = function (req, res, next)
 												{
 													if(err)
 													{
-														that.sendResponse(err, config.signup.views.route, user, {result:true}, req, res, next);
+														that.sendResponse(err, config.signup.views.signup, user, {view:'signup'}, undefined, req, res, next);
 													}
 													else
 													{
-														that.sendResponse(undefined, config.signup.views.signedUp, undefined, {result:true}, undefined, req, res, next);
+														that.sendResponse(undefined, config.signup.views.signedUp, undefined, {view:'signedUp'}, undefined, req, res, next);
 													}
 												});
 										}
@@ -665,7 +685,7 @@ Signup.prototype.getSignupToken = function (req, res, next)
 			// if format is wrong no need to query the database
 			if(!uuid.isValid(token))
 			{
-				that.sendResponse(undefined, config.signup.views.linkExpired, undefined, {result:true}, undefined, req, res, next);
+				that.sendResponse(undefined, config.signup.views.linkExpired, undefined, {view:'linkExpired'}, undefined, req, res, next);
 			}
 			else
 			{
@@ -689,7 +709,7 @@ Signup.prototype.getSignupToken = function (req, res, next)
 							// no user found -> forward to error handling middleware
 							if(!user)
 							{
-								that.sendResponse(undefined, config.signup.views.linkExpired, undefined, {result:true}, undefined, req, res, next);
+								that.sendResponse(undefined, config.signup.views.linkExpired, undefined, {view:'linkExpired'}, undefined, req, res, next);
 							}
 							// check if token has expired
 							else if(new Date(user.signupTokenExpires) < new Date())
@@ -706,7 +726,7 @@ Signup.prototype.getSignupToken = function (req, res, next)
 										}
 										else
 										{
-											that.sendResponse(undefined, config.signup.views.linkExpired, undefined, {result:true}, undefined, req, res, next);
+											that.sendResponse(undefined, config.signup.views.linkExpired, undefined, {view:'linkExpired'}, undefined, req, res, next);
 										}
 									});
 							}
@@ -754,18 +774,18 @@ Signup.prototype.getSignupToken = function (req, res, next)
 															}
 															else
 															{
-																that.sendResponse(undefined, req.query.redirect?undefined:config.signup.views.verified, user, {result:true}, req.query.redirect, req, res, next);
+																that.sendResponse(undefined, req.query.redirect?undefined:config.signup.views.verified, user, {view:'verified'}, req.query.redirect, req, res, next);
 															}
 														});
 												}
 												else
 												{
-													that.sendResponse(undefined, undefined, user, {result:true}, config.signup.completionResendRoute, req, res, next);
+													that.sendResponse(undefined, undefined, user, {view:'resend'}, config.signup.completionResendRoute, req, res, next);
 												}
 											}
 											else
 											{
-												that.sendResponse(undefined, config.signup.views.verified, user, {result:true}, undefined, req, res, next);
+												that.sendResponse(undefined, config.signup.views.verified, user, {view:'verified'}, config.signup.completionRoute, req, res, next);
 											}
 										}
 									});
@@ -776,11 +796,11 @@ Signup.prototype.getSignupToken = function (req, res, next)
 		}
 		else
 		{
-			that.sendResponse(undefined, config.signup.views.linkExpired, undefined, {result:true}, undefined, req, res, next);
+			that.sendResponse(undefined, config.signup.views.linkExpired, undefined, {view:'linkExpired'}, undefined, req, res, next);
 		}
 	}
 	else
 	{
-		that.sendResponse(undefined, config.signup.views.linkExpired, undefined, {result:true}, undefined, req, res, next);
+		that.sendResponse(undefined, config.signup.views.linkExpired, undefined, {view:'linkExpired'}, undefined, req, res, next);
 	}
 };
