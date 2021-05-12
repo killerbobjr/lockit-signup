@@ -156,8 +156,15 @@ Signup.prototype.getSignup = function (req, res, next)
 	var	config = this.config,
 		// save redirect url
 		suffix = req.query.redirect ? '?redirect=' + encodeURIComponent(req.query.redirect) : '';
-	
-	this.sendResponse(undefined, config.signup.views.signup, undefined, {action:this.route + suffix, view:'signup'}, undefined, req, res, next);
+		
+	if(req.query.token)
+	{
+		this.getSignupToken(req, res, next);
+	}
+	else
+	{
+		this.sendResponse(undefined, config.signup.views.signup, undefined, {action:this.route + suffix, view:'signup'}, undefined, req, res, next);
+	}
 };
 
 /**
@@ -311,18 +318,18 @@ Signup.prototype.postSignup = function (req, res, next)
 														}
 														else
 														{
-															that.sendResponse(undefined, req.query.redirect?undefined:config.signup.views.signedUp, user, {view:'signedUp'}, req.query.redirect, req, res, next);
+															that.sendResponse(undefined, req.query.redirect?undefined:config.signup.views.verify, user, {view:'verify'}, req.query.redirect, req, res, next);
 														}
 													});
 											}
 											else
 											{
-												that.sendResponse(undefined, undefined, user, {view:'signedUp'}, config.signup.completionRoute, req, res, next);
+												that.sendResponse(undefined, undefined, user, {view:'verify'}, config.signup.completionRoute, req, res, next);
 											}
 										}
 										else
 										{
-											that.sendResponse(undefined, config.signup.views.signedUp, user, {view:'signedUp'}, undefined, req, res, next);
+											that.sendResponse(undefined, config.signup.views.verify, user, {view:'verify'}, undefined, req, res, next);
 										}
 									}
 								});
@@ -379,9 +386,9 @@ Signup.prototype.postSignupResend = function (req, res, next)
 	var	config = this.config,
 		adapter = this.adapter,
 		that = this,
-		email = req.body.email,
-		name = req.body.name,
-		sms = req.body.phone,
+		email = req.body.email || res.locals.user.email,
+		name = req.body.name || res.locals.user.name,
+		sms = req.body.phone || res.locals.user.phoneNumber,
 		command = req.body.command,	// command to return after success
 		error,
 		token,
@@ -418,7 +425,7 @@ Signup.prototype.postSignupResend = function (req, res, next)
 			basequery = res.locals.basequery;
 		}
 
-		// check for user with given email address
+		// check for user with given name|email address
 		adapter.find(name !== undefined?'name':'email', name !== undefined?name:email, function (err, user)
 			{
 				if(err)
@@ -477,7 +484,7 @@ Signup.prototype.postSignupResend = function (req, res, next)
 														}
 														else
 														{
-															that.sendResponse(undefined, config.signup.views.smsSent, undefined, {view:'smsSent'}, undefined, req, res, next);
+															that.sendResponse(undefined, config.signup.views.verify, undefined, {view:'verify'}, undefined, req, res, next);
 														}
 													});
 											}
@@ -499,7 +506,7 @@ Signup.prototype.postSignupResend = function (req, res, next)
 											}
 											else
 											{
-												that.sendResponse(undefined, config.signup.views.smsSent, undefined, {view:'smsSent'}, undefined, req, res, next);
+												that.sendResponse(undefined, config.signup.views.verify, undefined, {view:'verify'}, undefined, req, res, next);
 											}
 										});
 								}
@@ -549,6 +556,23 @@ Signup.prototype.postSignupResend = function (req, res, next)
 										}
 									});
 							}
+						}
+						else if((req.body.email === undefined || req.body.email.length === 0) && user.signupToken !== undefined && user.signupToken.length > 0 && Date.parse(user.signupTokenExpires) > Date.now())
+						{
+							// Send token again
+							var	mail = new Mail(config);
+							
+							mail.signup(user.name, user.email, user.signupToken, function (err, result)
+								{
+									if(err)
+									{
+										that.sendResponse(err, config.signup.views.signup, user, {view:'signup'}, undefined, req, res, next);
+									}
+									else
+									{
+										that.sendResponse(undefined, config.signup.views.verify, undefined, {view:'verify'}, undefined, req, res, next);
+									}
+								});
 						}
 						else
 						{
@@ -601,7 +625,7 @@ Signup.prototype.postSignupResend = function (req, res, next)
 																	}
 																	else
 																	{
-																		that.sendResponse(undefined, config.signup.views.smsSent, undefined, {view:'smsSent'}, undefined, req, res, next);
+																		that.sendResponse(undefined, config.signup.views.verify, undefined, {view:'verify'}, undefined, req, res, next);
 																	}
 																});
 														}
@@ -623,7 +647,7 @@ Signup.prototype.postSignupResend = function (req, res, next)
 														}
 														else
 														{
-															that.sendResponse(undefined, config.signup.views.smsSent, undefined, {view:'smsSent'}, undefined, req, res, next);
+															that.sendResponse(undefined, config.signup.views.verify, undefined, {view:'verify'}, undefined, req, res, next);
 														}
 													});
 											}
@@ -643,7 +667,7 @@ Signup.prototype.postSignupResend = function (req, res, next)
 													}
 													else
 													{
-														that.sendResponse(undefined, config.signup.views.signedUp, undefined, {view:'signedUp'}, undefined, req, res, next);
+														that.sendResponse(undefined, config.signup.views.verify, undefined, {view:'verify'}, undefined, req, res, next);
 													}
 												});
 										}
@@ -671,8 +695,7 @@ Signup.prototype.getSignupToken = function (req, res, next)
 	var	config = this.config,
 		adapter = this.adapter,
 		that = this,
-		command = req.query.command,
-		token = req.params.token,
+		token = req.params.token ? req.params.token : req.query.token,
 		view;
 
 	// Reset alphabet
