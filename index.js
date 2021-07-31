@@ -47,8 +47,8 @@ var Signup = module.exports = function (cfg, adapter)
 	// change URLs if REST is active
 	if (config.rest)
 	{
-		this.route = '/' + config.rest.route + this.route;
-		this.resendRoute = '/' + config.rest.route + this.resendRoute;
+		this.route = config.rest.route + this.route;
+		this.resendRoute = config.rest.route + this.resendRoute;
 	}
 
 	var router = express.Router();
