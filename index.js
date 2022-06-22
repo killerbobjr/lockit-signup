@@ -252,7 +252,7 @@ Signup.prototype.postSignup = function (req, res, next)
 		}
 		async.each(checks, function (check, nextasync)
 			{
-				adapter.find(check.value, check.data, function (err, user)
+				adapter.find(check.value, check.data, basequery, function (err, user)
 				{
 					if(err)
 					{
@@ -281,7 +281,7 @@ Signup.prototype.postSignup = function (req, res, next)
 					{
 						nextasync();
 					}
-				}, basequery);
+				});
 			},
 			function (err)
 			{
@@ -426,7 +426,7 @@ Signup.prototype.postSignupResend = function (req, res, next)
 		}
 
 		// check for user with given name|email address
-		adapter.find(name !== undefined?'name':'email', name !== undefined?name:email, function (err, user)
+		adapter.find(name !== undefined?'name':'email', name !== undefined?name:email, basequery, function (err, user)
 			{
 				if(err)
 				{
@@ -676,7 +676,7 @@ Signup.prototype.postSignupResend = function (req, res, next)
 						}
 					}
 				}
-			}, basequery);
+			});
 	}
 };
 
@@ -721,7 +721,7 @@ Signup.prototype.getSignupToken = function (req, res, next)
 				}
 
 				// find user by token
-				adapter.find('signupToken', token, function (err, user)
+				adapter.find('signupToken', token, basequery, function (err, user)
 					{
 						if(err)
 						{
@@ -814,7 +814,7 @@ Signup.prototype.getSignupToken = function (req, res, next)
 									});
 							}
 						}
-					}, basequery);
+					});
 			}
 		}
 		else
