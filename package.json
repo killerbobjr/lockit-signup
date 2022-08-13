@@ -24,6 +24,7 @@
   "dependencies": {
     "async": "^3.1.0",
     "debug": "^4.1.1",
+    "lockit": "https://github.com/killerbobjr/lockit.git",
     "lockit-sendmail": "https://github.com/killerbobjr/lockit-sendmail.git",
     "moment": "^2.24.0",
     "ms": "^2.1.2",

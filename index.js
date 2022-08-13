@@ -266,13 +266,20 @@ Signup.prototype.postSignup = function (req, res, next)
 						}
 						else
 						{
-							if(check.value === 'email')
+							if(config.signup.useLogin)
 							{
-								error = 'The email <b>' + user.email + '</b> is already signed up.';
+								error = 'useLogin';
 							}
 							else
 							{
-								error = 'The user <b>' + user.name + '</b> is already signed up.';
+								if(check.value === 'email')
+								{
+									error = 'The email <b>' + user.email + '</b> is already signed up.';
+								}
+								else
+								{
+									error = 'The user <b>' + user.name + '</b> is already signed up.';
+								}
 							}
 						}
 						return nextasync();
@@ -291,7 +298,15 @@ Signup.prototype.postSignup = function (req, res, next)
 				}
 				else if(typeof error === 'string')
 				{
-					that.sendResponse({message:error}, config.signup.views.signup, undefined, {view:'signup'}, undefined, req, res, next);
+					if(error === 'useLogin')
+					{
+						var	lockit = require('lockit');
+						lockit.login.postLogin(req, res, next);
+					}
+					else
+					{
+						that.sendResponse({message:error}, config.signup.views.signup, undefined, {view:'signup'}, undefined, req, res, next);
+					}
 				}
 				else
 				{
