@@ -179,7 +179,7 @@ Signup.prototype.postSignup = function (req, res, next)
 	var	config = this.config,
 		adapter = this.adapter,
 		that = this,
-		name = req.body.name,
+		name = req.body.name.slice(0, config.maxlength || 100),
 		email = req.body.email,
 		password = req.body.password,
 		error,
