@@ -300,8 +300,7 @@ Signup.prototype.postSignup = function (req, res, next)
 				{
 					if(error === 'useLogin')
 					{
-						var	lockit = require('lockit');
-						lockit.login.postLogin(req, res, next);
+						that.config.that.login.postLogin(req, res, next);
 					}
 					else
 					{
